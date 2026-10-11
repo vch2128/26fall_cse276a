@@ -1,0 +1,12 @@
+source ~/ros_ws/install/setup.bash
+source /opt/ros/jazzy/setup.bash
+
+ros2 run robot_control calibrate
+ros2 run robot_control motor_control
+
+# straight line, 2 s
+ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=0.3 -p duration:=2.0 -p label:=fwd_0.3_2s
+# spin counter-clockwise, 3 s
+ros2 run robot_control calibrate --ros-args -p L:=-0.4 -p R:=0.4 -p duration:=3.0 -p label:=spin_0.4
+
+ros2 run robot_control calibrate --ros-args -p log_file:=~/ros2_ws/logs/spin_tests.csv

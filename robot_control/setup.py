@@ -29,6 +29,7 @@ setup(
             'motor_control = robot_control.motor_control:main',
             'keyboard_control = robot_control.keyboard_control:main',
             'velocity_control = robot_control.velocity_control:main',
+            'calibrate = robot_control.calibrate:main',
         ],
     },
 )

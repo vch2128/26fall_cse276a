@@ -72,6 +72,10 @@ class CalibrationNode(Node):
         self.last_yaw = None
         self.total_yaw = 0.0
         self.imu_count = 0
+        # Diagnostics: integrated gyro z (raw units * s), to cross-check the
+        # board's fused yaw and to find out the gyro's units.
+        self.gyro_z_int = 0.0
+        self.last_imu_time = None
 
     # ------------------------------------------------------------------ helpers
     def imu_callback(self, msg):
@@ -80,6 +84,10 @@ class CalibrationNode(Node):
             self.total_yaw += wrap(yaw - self.last_yaw)
         self.last_yaw = yaw
         self.imu_count += 1
+        now = time.monotonic()
+        if self.last_imu_time is not None:
+            self.gyro_z_int += msg.angular_velocity.z * (now - self.last_imu_time)
+        self.last_imu_time = now
 
     def send(self, left, right):
         msg = Float32MultiArray()
@@ -129,6 +137,9 @@ class CalibrationNode(Node):
         if self.imu_count == 0:
             self.get_logger().warn('No /imu_data received - yaw change will not be measured.')
         yaw_before = self.total_yaw
+        gyro_before = self.gyro_z_int
+        count_before = self.imu_count
+        raw_yaw_before = self.last_yaw
 
         # 3. Drive for exactly `duration` seconds at `rate` Hz.
         period = 1.0 / rate
@@ -150,6 +161,8 @@ class CalibrationNode(Node):
             self.spin_for(0.02)
         self.spin_for(float(self.param('settle')))
         yaw_change = self.total_yaw - yaw_before
+        gyro_change = self.gyro_z_int - gyro_before
+        imu_msgs = self.imu_count - count_before
 
         # 5. Report.
         imu_ok = self.imu_count > 0
@@ -165,6 +178,14 @@ class CalibrationNode(Node):
             print(f' avg turn rate    : {math.degrees(omega):+.1f} deg/s  ({omega:+.3f} rad/s)')
         else:
             print(' IMU yaw change   : n/a (no IMU data)')
+        # --- diagnostics ---
+        expected = int((actual + float(self.param('settle'))) * 50)
+        print(f' [diag] IMU msgs during run : {imu_msgs} (expect ~{expected} at 50 Hz)')
+        if raw_yaw_before is not None and self.last_yaw is not None:
+            print(f' [diag] raw yaw start -> end : {math.degrees(raw_yaw_before):+.1f} -> '
+                  f'{math.degrees(self.last_yaw):+.1f} deg')
+        print(f' [diag] integrated gyro z    : {gyro_change:+.2f} (gyro units x s; '
+              f'if gyro is deg/s this is degrees)')
 
         # 6. Optional hand-measured distance.
         distance = None

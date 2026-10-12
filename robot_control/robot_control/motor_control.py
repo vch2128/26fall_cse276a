@@ -222,7 +222,7 @@ class MotorControllerNode(Node):
         """process and publish IMU data"""
         try:
             # extract roll, pitch, yaw
-            # print(imu_data)
+            print(imu_data)
             roll = float(imu_data.get('r', 0))    # degrees
             pitch = float(imu_data.get('p', 0))   # degrees  
             yaw = float(imu_data.get('y', 0))     # degrees

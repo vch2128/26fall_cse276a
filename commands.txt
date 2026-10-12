@@ -1,4 +1,4 @@
-source ~/ros_ws/install/setup.bash
+source ~/ros2_ws/install/setup.bash
 source /opt/ros/jazzy/setup.bash
 
 ros2 run robot_control calibrate

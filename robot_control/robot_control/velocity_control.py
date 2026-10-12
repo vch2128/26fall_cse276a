@@ -3,7 +3,8 @@
 CSE 276A HW1 - drive the Waverover through the waypoints in waypoints.txt.
 
 Algorithm, for every waypoint (x, y, theta):
-    1. turn in place to face the waypoint      (closed loop on IMU yaw)
+    1. turn in place to face the waypoint      (closed loop on IMU yaw,
+                                                stop, settle, correct the rest)
     2. drive straight to it                    (distance from the speed model)
     3. turn in place to the waypoint's theta   (closed loop on IMU yaw)
 
@@ -18,6 +19,7 @@ and theta read from the IMU.
 Run (motor_control must be running in another terminal):
     ros2 run robot_control velocity_control                 # waypoints.txt
     ros2 run robot_control velocity_control test_turn.txt   # another file in config/
+    (config/*.txt is installed by colcon build -> rebuild after editing them)
 """
 import math
 import os
@@ -38,6 +40,8 @@ TURN_MAX = 0.45       # fastest turning command
 K_TURN = 0.5          # turning P gain   [command per rad]
 K_HEADING = 0.6       # steering P gain while driving [command per rad]
 ANGLE_TOL = 0.05      # [rad] ~3 deg, turn is done inside this
+TURN_LEAD = 0.0       # [rad] stop turning this early: the robot coasts on after the stop
+MAX_CORRECTIONS = 2   # after a turn, settle and re-turn at most this many times
 PAUSE = 0.5           # [s] stop between motions (lets the robot settle)
 RATE = 20.0           # [Hz] control loop (motor_control stops after 0.15 s without commands)
 
@@ -48,12 +52,13 @@ def wrap(a):
 
 
 def find_waypoint_file(name):
-    """Look for the file as given, then in robot_control/config/."""
-    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    for path in (name, os.path.join(here, 'config', name),
-                 os.path.expanduser('~/ros2_ws/src/26fall_cse276a/robot_control/config/' + name)):
-        if os.path.isfile(path):
-            return path
+    """Look for the file as given, then in the installed share/robot_control/config/."""
+    if os.path.isfile(name):
+        return name
+    from ament_index_python.packages import get_package_share_directory
+    path = os.path.join(get_package_share_directory('robot_control'), 'config', name)
+    if os.path.isfile(path):
+        return path
     raise FileNotFoundError(name)
 
 
@@ -152,6 +157,7 @@ class WaypointNavigator(Node):
             self.task_start = now + PAUSE      # stand still for PAUSE seconds first
             self.driven = 0.0
             self.turn_dir = None
+            self.corrections = 0
 
         if now < self.task_start:
             self.send(0, 0)
@@ -160,11 +166,21 @@ class WaypointNavigator(Node):
         kind, value = self.task
         if kind == 'turn':
             error = wrap(value - self.yaw)
-            if self.turn_dir is None:
+            if self.turn_dir is None:                  # start of a turn (or a correction)
+                if abs(error) < ANGLE_TOL or self.corrections > MAX_CORRECTIONS:
+                    self.task = None
+                    self.send(0, 0)
+                    return
                 self.turn_dir = math.copysign(1, error)
-            # done when close enough, or when we overshoot (error changed sign)
-            if abs(error) < ANGLE_TOL or math.copysign(1, error) != self.turn_dir:
-                self.task = None
+            # stop when close enough, or when we overshoot (error changed sign).
+            # The abs(error) check ignores the jump from +pi to -pi on ~180 deg turns.
+            overshot = math.copysign(1, error) != self.turn_dir and abs(error) < math.pi / 2
+            if abs(error) < ANGLE_TOL + TURN_LEAD or overshot:
+                # the robot keeps turning a bit after the stop: let it settle for
+                # PAUSE seconds, then check the angle again and correct if needed
+                self.turn_dir = None
+                self.corrections += 1
+                self.task_start = now + PAUSE
                 self.send(0, 0)
                 return
             cmd = min(max(K_TURN * abs(error), TURN_MIN), TURN_MAX)

@@ -73,6 +73,7 @@ class Calibrate(Node):
         self.last_yaw = None
         self.t0 = time.monotonic()
         self.t_move = None
+        self.yaw_at_stop = None      # yaw change when the motors were stopped
         self.finished = False
         self.last_print = 0.0
 
@@ -137,6 +138,8 @@ class Calibrate(Node):
                 self.send(-self.cmd, self.cmd)
             return
         self.send(0.0, 0.0)
+        if self.yaw_at_stop is None:
+            self.yaw_at_stop = self.yaw_total
         if elapsed < self.duration + 1.0:   # let it coast to a stop, keep reading the IMU
             return
         deg = math.degrees(self.yaw_total) if self.yaw is not None else float('nan')
@@ -147,9 +150,11 @@ class Calibrate(Node):
                 f'  -> drift > 0 means it curved LEFT, < 0 curved RIGHT')
         else:
             rate = math.radians(deg) / self.duration
+            coast = self.yaw_total - self.yaw_at_stop
             self.get_logger().info(
                 f'DONE. spin cmd={self.cmd} for {self.duration:.2f} s.\n'
                 f'  IMU yaw change = {deg:+.1f} deg  ->  yaw rate = {rate:+.2f} rad/s\n'
+                f'  coasted {math.degrees(coast):+.1f} deg after the stop  ->  TURN_LEAD ~ {abs(coast):.2f}\n'
                 f'  (positive cmd should give a POSITIVE change; if negative, set IMU_SIGN = -1.0)')
         self.finished = True
 

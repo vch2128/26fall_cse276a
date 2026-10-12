@@ -29,8 +29,24 @@ import rclpy
 from std_msgs.msg import Float32MultiArray
 
 # ---- measure these two numbers on your robot ----
-SECONDS_PER_METER = 3.6     # how many seconds of [0.25, 0.25] drive 1 meter
-SECONDS_PER_90_DEG = 0.8    # how many seconds of [-0.35, 0.35] turn 90 degrees
+SECONDS_PER_METER = 3.2     # how many seconds of [0.25, 0.25] drive 1 meter
+L_SECONDS_PER_90_DEG = 0.95    # how many seconds of [-0.35, 0.35] turn 90 degrees
+R_SECONDS_PER_90_DEG = 1 
+L_fwd = 0.93
+L_rev = 0.94
+R_fwd = 1.08
+R_rev = 1
+
+
+BASE_TURN = 0.3
+
+# Measured in the turn-timing experiment (seconds to turn that angle)
+CCW_SECONDS_PER_45_DEG = 0.6   # left turn, 45
+CCW_SECONDS_PER_90_DEG = 0.95   # left turn, 90°
+CW_SECONDS_PER_45_DEG  = 0.61   # right turn, 45
+CW_SECONDS_PER_90_DEG  = 1.0   # right turn, 90°
+
+MIN_TURN_DEG = 3.0 
 
 FOLDER = os.path.expanduser('~/ros2_ws/src/26fall_cse276a/robot_control/config')
 
@@ -59,12 +75,31 @@ def drive(meters): # go straight
     send(0.25, 0.25, meters * SECONDS_PER_METER)
 
 
+def turn_seconds(deg, s45, s90):
+    """Time to turn `deg` degrees (deg >= 0).
+
+    Straight line through the two measured points (45°, s45) and (90°, s90):
+        t(θ) = s45 + (θ - 45°) · (s90 - s45) / 45°
+    which is the same as t = t_dead + θ / ω, with
+        ω      = 45° / (s90 - s45)        turn rate once spinning (deg/s)
+        t_dead = (3·s45 - s90) / 2        spin-up delay (s)
+    """
+    return max(0.0, s45 + (deg - 45.0) * (s90 - s45) / 45.0)
+
+
 def turn(radians):
-    seconds = abs(radians) / (math.pi / 2) * SECONDS_PER_90_DEG
-    if radians > 0:     # turn left
-        send(-0.35, 0.35, seconds)
-    else:               # turn right
-        send(0.35, -0.35, seconds)
+    # take the short way round: wrap the angle to (-180°, 180°]
+    radians = math.atan2(math.sin(radians), math.cos(radians))
+    deg = math.degrees(abs(radians))
+    if deg < MIN_TURN_DEG:
+        return
+
+    if radians > 0:     # turn left (CCW): left wheel back, right wheel forward
+        seconds = turn_seconds(deg, CCW_SECONDS_PER_45_DEG, CCW_SECONDS_PER_90_DEG)
+        send(-BASE_TURN * L_rev, BASE_TURN * R_fwd, seconds)
+    else:               # turn right (CW): left wheel forward, right wheel back
+        seconds = turn_seconds(deg, CW_SECONDS_PER_45_DEG, CW_SECONDS_PER_90_DEG)
+        send(BASE_TURN * L_fwd, -BASE_TURN * R_rev, seconds)
 
 
 def angle_diff(a, b):

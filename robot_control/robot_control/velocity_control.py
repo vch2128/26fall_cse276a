@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """
-CSE 276A HW1 - drive the Waverover through the waypoints in waypoints.txt.
+CSE 276A HW1 - drive through the waypoints in waypoints.txt.
 
-Algorithm, for every waypoint (x, y, theta):
-    1. turn in place to face the waypoint      (closed loop on IMU yaw,
-                                                stop, settle, correct the rest)
-    2. drive straight to it                    (distance from the speed model)
-    3. turn in place to the waypoint's theta   (closed loop on IMU yaw)
+The robot can only do two things:
+    drive(meters)   -> send [0.25, 0.25]  for  meters * SECONDS_PER_METER
+    turn(radians)   -> send [-0.35, 0.35] for  (radians / 90 deg) * SECONDS_PER_90_DEG
 
-Kinematic model (differential drive / unicycle):
-    v = (v_R + v_L) / 2,   omega = (v_R - v_L) / track_width
-    x' = v cos(theta),     y' = v sin(theta),     theta' = omega
-The robot has no wheel encoders, so the position is dead-reckoned:
-    x += v cos(theta) dt,  y += v sin(theta) dt
-with v = DRIVE_SPEED (calibrated) while driving, 0 while turning in place,
-and theta read from the IMU.
+For every waypoint (x, y, theta):
+    1. turn to face the waypoint
+    2. drive straight to it
+    3. turn to theta
+
+Kinematic model: after each motion we update where we think the robot is
+    x = x + distance * cos(heading)
+    y = y + distance * sin(heading)
+    heading = heading + turned angle
 
 Run (motor_control must be running in another terminal):
-    ros2 run robot_control velocity_control                 # waypoints.txt
-    ros2 run robot_control velocity_control test_turn.txt   # another file in config/
-    (config/*.txt is installed by colcon build -> rebuild after editing them)
+    ros2 run robot_control velocity_control
+    ros2 run robot_control velocity_control test_left.txt
 """
 import math
 import os
@@ -27,196 +26,97 @@ import sys
 import time
 
 import rclpy
-from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
-from sensor_msgs.msg import Imu
 
-# ---------------- calibration (measure these on your robot!) ----------------
-DRIVE_CMD = 0.25      # wheel command used for driving straight
-DRIVE_SPEED = 0.20    # [m/s] measured speed at DRIVE_CMD  (distance / time)
-IMU_SIGN = 1.0        # +1 if IMU yaw increases when turning left, else -1
-TURN_MIN = 0.28       # smallest command that reliably rotates the robot in place
-TURN_MAX = 0.45       # fastest turning command
-K_TURN = 0.5          # turning P gain   [command per rad]
-K_HEADING = 0.6       # steering P gain while driving [command per rad]
-ANGLE_TOL = 0.05      # [rad] ~3 deg, turn is done inside this
-TURN_LEAD = 0.0       # [rad] stop turning this early: the robot coasts on after the stop
-MAX_CORRECTIONS = 2   # after a turn, settle and re-turn at most this many times
-PAUSE = 0.5           # [s] stop between motions (lets the robot settle)
-RATE = 20.0           # [Hz] control loop (motor_control stops after 0.15 s without commands)
+# ---- measure these two numbers on your robot ----
+SECONDS_PER_METER = 3.6     # how many seconds of [0.25, 0.25] drive 1 meter
+SECONDS_PER_90_DEG = 0.8    # how many seconds of [-0.35, 0.35] turn 90 degrees
+
+FOLDER = os.path.expanduser('~/ros2_ws/src/26fall_cse276a/robot_control/config')
 
 
-def wrap(a):
-    """Wrap an angle to [-pi, pi]."""
-    return math.atan2(math.sin(a), math.cos(a))
-
-
-def find_waypoint_file(name):
-    """Look for the file as given, then in the installed share/robot_control/config/."""
-    if os.path.isfile(name):
-        return name
-    from ament_index_python.packages import get_package_share_directory
-    path = os.path.join(get_package_share_directory('robot_control'), 'config', name)
-    if os.path.isfile(path):
-        return path
-    raise FileNotFoundError(name)
-
-
-def load_waypoints(path):
-    pts = []
-    for line in open(path):
-        line = line.split('#')[0].strip()
-        if line:
-            x, y, th = (float(v) for v in line.split(','))
-            pts.append((x, y, th))
-    return pts
-
-
-class WaypointNavigator(Node):
-    def __init__(self, waypoint_file):
-        super().__init__('velocity_control')
-        self.waypoints = load_waypoints(waypoint_file)
-        self.get_logger().info(f'{len(self.waypoints)} waypoints from {waypoint_file}')
-
-        self.pub = self.create_publisher(Float32MultiArray, 'motor_commands', 10)
-        self.create_subscription(Imu, 'imu_data', self.imu_callback, 10)
-
-        # robot state (dead reckoning); the first waypoint is the start pose
-        self.x, self.y, self.yaw = self.waypoints[0]
-        self.imu_yaw = None       # latest raw IMU yaw
-        self.yaw_offset = None    # makes yaw = theta of the first waypoint at start
-
-        # list of motions still to do: ('turn', angle) or ('drive', distance)
-        self.wp_index = 0
-        self.tasks = []
-        self.task = None
-        self.task_start = 0.0
-        self.driven = 0.0
-        self.done = False
-        self.last_time = time.time()
-        self.timer = self.create_timer(1.0 / RATE, self.loop)
-
-    # ---- sensors ----
-    def imu_callback(self, msg):
-        q = msg.orientation
-        self.imu_yaw = IMU_SIGN * math.atan2(2 * (q.w * q.z + q.x * q.y),
-                                             1 - 2 * (q.y * q.y + q.z * q.z))
-
-    def send(self, left, right):
+def send(left, right, seconds):
+    """Send [left, right] to motor_control for some seconds, then stop."""
+    end = time.time() + seconds
+    while time.time() < end:
         msg = Float32MultiArray()
         msg.data = [float(left), float(right)]
-        self.pub.publish(msg)
-
-    # ---- planning ----
-    def plan_next_waypoint(self):
-        """Turn toward the next waypoint, drive to it, turn to its theta."""
-        self.wp_index += 1
-        if self.wp_index >= len(self.waypoints):
-            return False
-        tx, ty, tth = self.waypoints[self.wp_index]
-        dist = math.hypot(tx - self.x, ty - self.y)
-        if dist > 0.02:
-            self.tasks.append(('turn', math.atan2(ty - self.y, tx - self.x)))
-            self.tasks.append(('drive', dist))
-        self.tasks.append(('turn', tth))
-        self.get_logger().info(f'--> waypoint {self.wp_index}: ({tx}, {ty}, {tth}), {dist:.2f} m away')
-        return True
-
-    # ---- control loop (runs at RATE Hz) ----
-    def loop(self):
-        now = time.time()
-        dt = now - self.last_time
-        self.last_time = now
-
-        # wait for the IMU, then define yaw = theta of the first waypoint
-        if self.yaw_offset is None:
-            self.send(0, 0)
-            if self.imu_yaw is not None:
-                self.yaw_offset = self.yaw - self.imu_yaw
-                self.get_logger().info('IMU ready, starting')
-            return
-        self.yaw = wrap(self.imu_yaw + self.yaw_offset)
-
-        if self.done:
-            self.send(0, 0)
-            return
-
-        # pick the next motion
-        if self.task is None:
-            if not self.tasks:
-                if self.wp_index > 0:
-                    self.get_logger().info(
-                        f'    reached waypoint {self.wp_index}, estimate '
-                        f'x={self.x:.2f} y={self.y:.2f} yaw={self.yaw:.2f}')
-                if not self.plan_next_waypoint():
-                    self.get_logger().info('All waypoints done!')
-                    self.done = True
-                    self.send(0, 0)
-                    return
-            self.task = self.tasks.pop(0)
-            self.task_start = now + PAUSE      # stand still for PAUSE seconds first
-            self.driven = 0.0
-            self.turn_dir = None
-            self.corrections = 0
-
-        if now < self.task_start:
-            self.send(0, 0)
-            return
-
-        kind, value = self.task
-        if kind == 'turn':
-            error = wrap(value - self.yaw)
-            if self.turn_dir is None:                  # start of a turn (or a correction)
-                if abs(error) < ANGLE_TOL or self.corrections > MAX_CORRECTIONS:
-                    self.task = None
-                    self.send(0, 0)
-                    return
-                self.turn_dir = math.copysign(1, error)
-            # stop when close enough, or when we overshoot (error changed sign).
-            # The abs(error) check ignores the jump from +pi to -pi on ~180 deg turns.
-            overshot = math.copysign(1, error) != self.turn_dir and abs(error) < math.pi / 2
-            if abs(error) < ANGLE_TOL + TURN_LEAD or overshot:
-                # the robot keeps turning a bit after the stop: let it settle for
-                # PAUSE seconds, then check the angle again and correct if needed
-                self.turn_dir = None
-                self.corrections += 1
-                self.task_start = now + PAUSE
-                self.send(0, 0)
-                return
-            cmd = min(max(K_TURN * abs(error), TURN_MIN), TURN_MAX)
-            cmd = math.copysign(cmd, error)            # positive = turn left
-            self.send(-cmd, cmd)
-
-        elif kind == 'drive':
-            if self.driven >= value:
-                self.task = None
-                self.send(0, 0)
-                return
-            # kinematic model: integrate the position with the measured speed
-            self.x += DRIVE_SPEED * math.cos(self.yaw) * dt
-            self.y += DRIVE_SPEED * math.sin(self.yaw) * dt
-            self.driven += DRIVE_SPEED * dt
-            # keep pointing at the waypoint while driving
-            tx, ty, _ = self.waypoints[self.wp_index]
-            heading_error = wrap(math.atan2(ty - self.y, tx - self.x) - self.yaw)
-            if value - self.driven < 0.15:             # too close to steer reliably
-                heading_error = 0.0
-            steer = max(-0.1, min(0.1, K_HEADING * heading_error))
-            self.send(DRIVE_CMD - steer, DRIVE_CMD + steer)
+        pub.publish(msg)
+        time.sleep(0.05)          # motor_control needs a message at least every 0.15 s
+    stop(0.5)
 
 
-def main(args=None):
-    rclpy.init(args=args)
-    extra = rclpy.utilities.remove_ros_args(sys.argv)[1:]
-    node = WaypointNavigator(find_waypoint_file(extra[0] if extra else 'waypoints.txt'))
+def stop(seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        msg = Float32MultiArray()
+        msg.data = [0.0, 0.0]
+        pub.publish(msg)
+        time.sleep(0.05)
+
+
+def drive(meters): # go straight
+    send(0.25, 0.25, meters * SECONDS_PER_METER)
+
+
+def turn(radians):
+    seconds = abs(radians) / (math.pi / 2) * SECONDS_PER_90_DEG
+    if radians > 0:     # turn left
+        send(-0.35, 0.35, seconds)
+    else:               # turn right
+        send(0.35, -0.35, seconds)
+
+
+def angle_diff(a, b):
+    """Smallest angle to turn from b to a (between -pi and pi)."""
+    return math.atan2(math.sin(a - b), math.cos(a - b))
+
+
+def read_waypoints(name):
+    points = []
+    for line in open(os.path.join(FOLDER, name)):
+        if line.strip() and not line.startswith('#'):
+            x, y, theta = line.split(',')
+            points.append((float(x), float(y), float(theta)))
+    return points
+
+
+def main():
+    global pub
+    rclpy.init()
+    node = rclpy.create_node('velocity_control')
+    pub = node.create_publisher(Float32MultiArray, 'motor_commands', 10)
+
+    name = sys.argv[1] if len(sys.argv) > 1 else 'waypoints.txt'
+    waypoints = read_waypoints(name)
+    x, y, heading = waypoints[0]          # the robot starts at the first waypoint
+    stop(1.0)
+
     try:
-        while rclpy.ok() and not node.done:
-            rclpy.spin_once(node, timeout_sec=0.1)
-        time.sleep(0.5)
+        for goal_x, goal_y, goal_theta in waypoints[1:]:
+            distance = math.hypot(goal_x - x, goal_y - y)
+
+            if distance > 0.02:
+                # 1. turn to face the waypoint
+                direction = math.atan2(goal_y - y, goal_x - x)
+                turn(angle_diff(direction, heading))
+                heading = direction
+                # 2. drive to it  (kinematic model: update x, y)
+                drive(distance)
+                x = x + distance * math.cos(heading)
+                y = y + distance * math.sin(heading)
+
+            # 3. turn to the waypoint's theta
+            turn(angle_diff(goal_theta, heading))
+            heading = goal_theta
+
+            print(f'reached ({goal_x}, {goal_y}, {goal_theta})')
+            stop(1.0)
+        print('Done!')
     except KeyboardInterrupt:
         pass
     finally:
-        node.send(0, 0)          # always stop the robot
+        stop(0.2)                         # always stop the robot
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

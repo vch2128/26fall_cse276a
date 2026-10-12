@@ -1,3 +1,0 @@
-# Drive 1 m forward
-0,0,0
-1,0,0

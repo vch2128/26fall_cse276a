@@ -1,4 +1,3 @@
 # Drive 1 m forward, turn around (180 deg) and drive back
 0,0,0
 1,0,0
-0,0,0

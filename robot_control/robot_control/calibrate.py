@@ -71,7 +71,7 @@ class CalibrationNode(Node):
         self.declare_parameter('ramp', 0.15)
         self.declare_parameter('rate', 20.0)
         self.declare_parameter('start_delay', 1.0)
-        self.declare_parameter('settle', 0.5)
+        self.declare_parameter('settle', 1.0)
         self.declare_parameter('label', '')
         self.declare_parameter('ask_distance', True)
         # New file name because the columns changed (board yaw column removed).

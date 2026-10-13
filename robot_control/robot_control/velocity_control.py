@@ -43,8 +43,8 @@ BASE_TURN = 0.3             # command for the timed turn
 
 # Measured (degrees, seconds) at BASE_TURN with the gains above.
 # Between points: straight-line interpolation; outside: the end segment is extended.
-CCW_TABLE = [(45, 0.65), (90, 1.065), (135, 1.40), (180, 1.85)]   # left turns
-CW_TABLE = [(45, 0.555), (90, 1.03), (135, 1.28), (180, 1.75)]    # right turns
+CCW_TABLE = [(45, 0.68), (90, 1.1), (135, 1.48), (180, 1.88)]   # left turns
+CW_TABLE = [(45, 0.7), (90, 1.04), (135, 1.38), (180, 1.95)]    # right turns
 # NOTE: CW 90 and 135 sit on opposite sides of a straight line by ~0.07 s; re-measure.
 
 MIN_TURN_DEG = 3.0          # smaller turns are skipped

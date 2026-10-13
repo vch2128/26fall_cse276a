@@ -32,8 +32,8 @@ ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p gain_l_rev:=
 180 dur=1.85
 
 # right (cw)
-ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p duration:=1.0 -p gain_l_fwd:=0.93
+ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p gain_l_fwd:=0.9 -p duration:=1.0 
 45 dur=0.555
-90 dur 1.03
-135 dur 1.28
-180 dur1.75
+90 dur 1.04
+135 dur 1.38
+180 dur 1.95

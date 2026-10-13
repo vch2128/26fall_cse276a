@@ -5,7 +5,10 @@ ros2 run robot_control calibrate
 ros2 run robot_control motor_control
 
 
-ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p duration:=1.0 -p gain_l_fwd:=0.93 -p label:=cw_0.25_1.7s
+ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p gain_l_fwd:=0.93 -p duration:=0.55
+
+ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p gain_l_rev:=0.94 -p gain_r_fwd:=1.08 -p duration:=0.6
+
 # spin counter-clockwise, 3 s
 ros2 run robot_control calibrate --ros-args -p L:=-0.4 -p R:=0.4 -p duration:=3.0 -p label:=spin_0.4
 

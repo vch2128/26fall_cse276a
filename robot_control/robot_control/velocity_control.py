@@ -59,7 +59,9 @@ CW_TABLE = [(45, 0.555), (90, 1.03), (135, 1.28), (180, 1.75)]    # right turns
 MIN_TURN_DEG = 3.0          # smaller turns are skipped
 
 # ---- gyro correction ----
-USE_GYRO_CORRECTION = True
+USE_GYRO_CORRECTION = False # off for now: timed turns only
+MEASURE_TURNS = True        # still measure every turn with the gyro (bias + angle) and log
+                            # it; costs a BIAS_SECONDS pause before each turn
 SLOW_TURN = 0.22            # command for the correction spin (must be above the dead zone)
 TOL_DEG = 3.0               # accept the timed turn if it is within this many degrees
 COAST_DEG = 2.0             # stop the correction this much early (robot coasts after stop)
@@ -276,7 +278,8 @@ def turn(radians):
     sign = 1 if target > 0 else -1
     table = CCW_TABLE if sign > 0 else CW_TABLE
 
-    have_imu = USE_GYRO_CORRECTION and gyro.update_bias()   # robot is still here
+    # robot is still here: measure the gyro bias (needed for measuring and correcting)
+    have_imu = (USE_GYRO_CORRECTION or MEASURE_TURNS) and gyro.update_bias()
 
     # 1. timed turn (the gyro only measures)
     turned, gyro_ok = rotate(sign, table_time(abs(target), table))

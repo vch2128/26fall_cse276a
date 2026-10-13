@@ -23,3 +23,17 @@ for c in 0.35; do for d in ccw; do for n in 1; do
     -p ask_distance:=false -p label:=spin_${d}_${c}_t$n
   read -p "Enter for next"
 done; done; done
+
+# left (ccw)
+ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p gain_l_rev:=0.94 -p gain_r_fwd:=1.08 -p duration:=0.95
+45 dur=0.65
+90 dur=1.065
+135 dur=1.4
+180 dur=1.85
+
+# right (cw)
+ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p duration:=1.0 -p gain_l_fwd:=0.93
+45 dur=0.555
+90 dur 1.03
+135 dur 1.28
+180 dur1.75

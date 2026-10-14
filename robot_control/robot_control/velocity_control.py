@@ -170,15 +170,14 @@ def main():
         for goal_x, goal_y, goal_theta in waypoints[1:]:
             distance = math.hypot(goal_x - x, goal_y - y)
 
-            if distance > 0.02:
-                # 1. turn to face the waypoint
-                direction = math.atan2(goal_y - y, goal_x - x)
-                turn(angle_diff(direction, heading))
-                heading = direction
-                # 2. drive to it  (kinematic model: update x, y)
-                drive(distance)
-                x = x + distance * math.cos(heading)
-                y = y + distance * math.sin(heading)
+            # 1. turn to face the waypoint
+            direction = math.atan2(goal_y - y, goal_x - x)
+            turn(angle_diff(direction, heading))
+            heading = direction
+            # 2. drive to it  (kinematic model: update x, y)
+            drive(distance)
+            x = x + distance * math.cos(heading)
+            y = y + distance * math.sin(heading)
 
             # 3. turn to the waypoint's theta
             turn(angle_diff(goal_theta, heading))

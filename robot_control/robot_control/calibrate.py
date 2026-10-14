@@ -13,17 +13,17 @@ Start motor_control first, then for example:
   ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p duration:=1.0 -p label:=spin_ccw
   # CCW spin with the left reverse gain reduced
   ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p duration:=1.0 \
-      -p gain_l_rev:=0.94 -p label:=spin_ccw_gain094
+      -p L_rev:=0.94 -p label:=spin_ccw_gain094
 
 Parameters
   L, R             wheel commands before gains (motor_control clips to +/-0.5)
   duration         seconds to drive                                (default 2.0)
-  gain_l_fwd, gain_l_rev, gain_r_fwd, gain_r_rev
+  L_fwd, L_rev, R_fwd, R_rev
                    multiplier per wheel and direction               (default 1.0)
   ramp             seconds to ramp the command up from 0           (default 0.15)
   rate             publish rate in Hz                               (default 20.0)
   start_delay      seconds to wait before moving                   (default 1.0)
-  settle           seconds to wait after the stop                  (default 1.0)
+  settle           seconds to wait after the stop                  (default 0.5)
   label            free text saved in the log
   log_file         CSV log path
 """
@@ -55,14 +55,14 @@ class CalibrationNode(Node):
         self.declare_parameter('L', 0.3)
         self.declare_parameter('R', 0.3)
         self.declare_parameter('duration', 2.0)
-        self.declare_parameter('gain_l_fwd', 1.0)
-        self.declare_parameter('gain_l_rev', 1.0)
-        self.declare_parameter('gain_r_fwd', 1.0)
-        self.declare_parameter('gain_r_rev', 1.0)
+        self.declare_parameter('L_fwd', 1.0)
+        self.declare_parameter('L_rev', 1.0)
+        self.declare_parameter('R_fwd', 1.0)
+        self.declare_parameter('R_rev', 1.0)
         self.declare_parameter('ramp', 0.15)
         self.declare_parameter('rate', 20.0)
         self.declare_parameter('start_delay', 1.0)
-        self.declare_parameter('settle', 1.0)
+        self.declare_parameter('settle', 0.5)
         self.declare_parameter('label', '')
         self.declare_parameter('log_file', '~/ros2_ws/logs/calibration_log_v3.csv')
 
@@ -84,8 +84,8 @@ class CalibrationNode(Node):
         return self.get_parameter(name).value
 
     def gains(self):
-        return (float(self.param('gain_l_fwd')), float(self.param('gain_l_rev')),
-                float(self.param('gain_r_fwd')), float(self.param('gain_r_rev')))
+        return (float(self.param('L_fwd')), float(self.param('L_rev')),
+                float(self.param('R_fwd')), float(self.param('R_rev')))
 
     def shaped(self, left, right):
         """Apply per-wheel gains and clip."""
@@ -151,7 +151,7 @@ class CalibrationNode(Node):
         print('\n================ calibration result ================')
         print(f' label            : {label or "-"}')
         print(f' command  L, R    : {left:.3f}, {right:.3f}  -> sent {eff_l:.3f}, {eff_r:.3f}')
-        print(f' gains            : L fwd {glf:.3f} rev {glr:.3f} | R fwd {grf:.3f} rev {grr:.3f}')
+        print(f' gains            : L_fwd {glf:.3f}  L_rev {glr:.3f} | R_fwd {grf:.3f}  R_rev {grr:.3f}')
         print(f' drive time       : {actual:.3f} s')
         print('====================================================\n')
 
@@ -172,7 +172,7 @@ class CalibrationNode(Node):
                 if new_file:
                     writer.writerow([
                         'timestamp', 'label', 'L', 'R', 'L_sent', 'R_sent',
-                        'gain_l_fwd', 'gain_l_rev', 'gain_r_fwd', 'gain_r_rev',
+                        'L_fwd', 'L_rev', 'R_fwd', 'R_rev',
                         'duration_requested_s', 'duration_actual_s'])
                 writer.writerow([
                     datetime.now().isoformat(timespec='seconds'), label,

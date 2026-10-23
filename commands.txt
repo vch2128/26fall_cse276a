@@ -37,3 +37,13 @@ ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p gain_l_fwd:=
 90 dur 1.04
 135 dur 1.38
 180 dur 1.95
+
+
+#t1
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch robot_vision_camera robot_vision_camera.launch.py
+
+#t2
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash

@@ -58,7 +58,6 @@ FOLDER = os.path.expanduser('~/ros2_ws/src/26fall_cse276a/robot_control/config')
 node = None
 pub = None
 
-
 def spin_for(seconds):
     """Wait while letting ROS process its work (spin_once instead of time.sleep)."""
     end = time.monotonic() + seconds

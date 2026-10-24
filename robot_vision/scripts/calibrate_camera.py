@@ -13,7 +13,7 @@ Runs anywhere with Python + OpenCV (no ROS):  pip install opencv-python numpy
 
     python3 calibrate_camera.py calib_frames                         # 9x6 inner corners, 25 mm squares
     python3 calibrate_camera.py calib_frames --cols 9 --rows 6 --square 0.025
-    python3 calibrate_camera.py calib_frames --cols 6 --rows 4 --square 0.032
+    python3 calibrate_camera.py /home/ubuntu/ros2_ws/src/26fall_cse276a/focus_photos --cols 6 --rows 4 --square 0.032
     python3 calibrate_camera.py calib_frames --drop-above 1.0        # drop images worse than 1 px, recalibrate
     python3 calibrate_camera.py calib_frames --model rational        # 8 coefficients; only if plumb_bob
                                                                      # leaves edges curved / error high

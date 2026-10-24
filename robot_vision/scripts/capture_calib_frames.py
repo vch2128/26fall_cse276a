@@ -10,7 +10,7 @@ you have covered so far (it replaces the ROS calibrator's X / Y / Size bars).
 
 Terminal 1:  ros2 launch robot_vision_camera robot_vision_camera.launch.py
 Terminal 2:  python3 capture_calib_frames.py                  # Enter = save, q + Enter = quit
-             python3 capture_calib_frames.py --auto 1.5       # save every 1.5 s instead
+             python3 capture_calib_frames.py --auto 1         # save every 1.5 s instead
              python3 capture_calib_frames.py --cols 9 --rows 6 --out ~/calib_frames
 
 --cols / --rows are INNER corners (a board of 10 x 7 squares has 9 x 6 inner corners).

@@ -4,6 +4,7 @@ source /opt/ros/jazzy/setup.bash
 ros2 run robot_control calibrate
 ros2 run robot_control motor_control
 ros2 run robot_control velocity_control
+ros2 run robot_vision 
 
 ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p gain_l_fwd:=0.93 -p duration:=0.55
 
@@ -47,3 +48,8 @@ ros2 launch robot_vision_camera robot_vision_camera.launch.py
 #t2
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
+ros2 topic list
+ros2 topic hz /camera/image_raw
+
+# camera
+sudo dmesg | grep -i "probe success"

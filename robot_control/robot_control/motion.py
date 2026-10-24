@@ -21,6 +21,7 @@ from std_msgs.msg import Float32MultiArray
 
 # ---- driving straight ----
 SECONDS_PER_METER = 3.2     # how many seconds of [0.25, 0.25] drive 1 meter
+DRIVE_CMD = 0.25
 
 # ---- wheel gains (multiply BASE_TURN for each wheel / direction) ----
 L_fwd = 0.93
@@ -116,7 +117,7 @@ class Motion:
         self.stop(STOP_SECONDS)
 
     def drive(self, meters):  # go straight
-        self.send(0.25, 0.25, meters * SECONDS_PER_METER)
+        self.send(DRIVE_CMD, DRIVE_CMD, meters * SECONDS_PER_METER)
 
     def rotate(self, sign, seconds, speed=BASE_TURN):
         """Spin in place for `seconds` (ramped up at the start), then stop."""

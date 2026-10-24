@@ -15,7 +15,7 @@ Only classes listed in landmarks.yaml are reported, at most one box per class
 
 Run:
     ros2 run landmark_nav detector --ros-args \
-        -p landmarks_file:=<path>/landmarks.yaml -p model:=yolo11n.pt
+        -p landmarks_file:=<path>/landmarks.yaml -p model:=yolo26n.pt
 """
 import json
 import math
@@ -33,7 +33,7 @@ class LandmarkDetector(Node):
     def __init__(self):
         super().__init__('landmark_detector')
         p = self.declare_parameter
-        self.model_path = p('model', 'yolo11n.pt').value
+        self.model_path = p('model', 'yolo26n.pt').value
         self.imgsz = p('imgsz', 320).value            # YOLO input size; 320 is much faster on the Pi
         self.conf_min = p('conf', 0.5).value
         self.border = p('border_px', 8).value          # drop boxes this close to the image edge

@@ -28,6 +28,7 @@ from std_msgs.msg import Float32MultiArray, String
 from spatialmath import UnitQuaternion
 
 from landmark_nav.ekf import PoseEKF
+from robot_control import motion as cal        # the calibration the controllers use
 
 
 class Localizer(Node):
@@ -35,10 +36,16 @@ class Localizer(Node):
         super().__init__('landmark_localizer')
         p = self.declare_parameter
         x0 = [float(v) for v in p('start_pose', [0.0, 0.0, 0.0]).value]
-        # HW1 calibration: [0.25, 0.25] drives 1 m in SECONDS_PER_METER = 3.2 s
-        self.v_per_cmd = p('v_per_cmd', 1.0 / 3.2 / 0.25).value          # m/s per unit wheel command
-        # HW1 calibration: 90 deg in ~1.08 s at BASE_TURN = 0.3 (IMU was unreliable, so turns are open-loop)
-        self.w_per_cmd = p('w_per_cmd', math.radians(90) / 1.08 / 0.3).value
+        # Odometry from the same calibration the controllers use (robot_control/motion.py),
+        # so re-calibrating there updates the localizer too. No IMU: turns are open-loop.
+        self.v_per_cmd = 1.0 / (cal.SECONDS_PER_METER * cal.DRIVE_CMD)   # m/s per unit wheel command
+
+        def turn_rate(table, gain_sum):
+            cmd = 0.5 * cal.BASE_TURN * gain_sum                         # value of 0.5*(R-L) during that turn
+            return math.radians(90) / cal.table_time(90, table) / cmd    # rad/s per unit of 0.5*(R-L)
+
+        self.w_ccw = turn_rate(cal.CCW_TABLE, cal.L_rev + cal.R_fwd)    # left turns
+        self.w_cw = turn_rate(cal.CW_TABLE, cal.L_fwd + cal.R_rev)      # right turns
         self.cam_offset = p('cam_offset', 0.0).value                     # camera ahead of robot center (m)
         # process noise (std devs), tune from repeated HW1 runs
         self.s_ds = p('sigma_ds_per_m', 0.05).value                      # 5 cm per meter driven
@@ -96,7 +103,8 @@ class Localizer(Node):
         driving = L * R > 0.0                          # same sign -> straight; opposite -> spin in place
         ds = 0.5 * (L + R) * self.v_per_cmd * dt if driving else 0.0
 
-        dth = 0.0 if driving else 0.5 * (R - L) * self.w_per_cmd * dt
+        w_per_cmd = self.w_ccw if R > L else self.w_cw
+        dth = 0.0 if driving else 0.5 * (R - L) * w_per_cmd * dt
         self.w = dth / dt if dt > 0 else 0.0
 
         var_ds = (self.s_ds ** 2) * abs(ds) + 1e-8

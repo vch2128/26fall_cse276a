@@ -1,0 +1,19 @@
+# Landmark map for HW2.
+# World frame: origin = robot start pose (0, 0, 0), +x = initial facing direction,
+# +y = to the robot's left, theta CCW-positive.
+#
+# Keys MUST be YOLO class names (COCO names for a stock model, e.g. 'teddy bear',
+# 'potted plant', 'suitcase', 'tv', 'umbrella', 'backpack'), and each class must
+# appear only ONCE in the room, or the detector can't tell them apart.
+# Avoid classes the lab is full of (chair, tv/monitor, bottle, person).
+#
+# x, y   = landmark center on the floor (tape-measured, meters)
+# height = real height of the object (meters) -> range from box height
+#
+# TODO: these positions are a starting suggestion for the path
+#   (0,0,0) -> (1,0,0) -> (1,2,pi) -> (0,0,0); measure the real values.
+landmarks:
+  teddy bear:     {x: 2.2,  y: 0.3,  height: 0.30}   # ahead on leg 1, and at the final pose (facing +x)
+  potted plant:   {x: 1.3,  y: 3.0,  height: 0.40}   # ahead on leg 2 (facing +y)
+  suitcase:       {x: -1.0, y: 2.0,  height: 0.55}   # seen at waypoint 2 (facing -x, theta = pi)
+  backpack:       {x: -0.6, y: -1.2, height: 0.45}   # ahead on leg 3 (driving back toward the origin)

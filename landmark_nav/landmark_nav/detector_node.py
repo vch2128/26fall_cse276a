@@ -33,9 +33,9 @@ class LandmarkDetector(Node):
         super().__init__('landmark_detector')
         p = self.declare_parameter
         self.model_path = p('model', 'yolo26n.pt').value
-        self.imgsz = p('imgsz', 640).value            # YOLO input size; 320 is much faster on the Pi
+        self.imgsz = p('imgsz', 1280).value            # YOLO input size; 320 is much faster on the Pi
         self.conf_min = p('conf', 0.25).value
-        self.border = p('border_px', 0).value          # drop boxes this close to the image edge
+        self.border = p('border_px', 5).value          # drop boxes this close to the image edge
         self.min_h = p('min_box_h_px', 12).value       # drop tiny (far / unreliable) boxes
         self.sigma_px = p('sigma_px', 3.0).value       # pixel noise of a box edge (tune from data)
         self.image_is_rgb = p('image_is_rgb', False).value  # camera node says "rgb8"; YOLO wants BGR

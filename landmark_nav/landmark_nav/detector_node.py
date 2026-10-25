@@ -14,8 +14,7 @@ Only classes listed in landmarks.yaml are reported, at most one box per class
 (the most confident one), so each class must be a unique object in the room.
 
 Run:
-    ros2 run landmark_nav detector --ros-args \
-        -p landmarks_file:=<path>/landmarks.yaml -p model:=yolo26n.pt
+    ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml -p model:=yolo26n.pt
 """
 import json
 import math
@@ -34,12 +33,12 @@ class LandmarkDetector(Node):
         super().__init__('landmark_detector')
         p = self.declare_parameter
         self.model_path = p('model', 'yolo26n.pt').value
-        self.imgsz = p('imgsz', 320).value            # YOLO input size; 320 is much faster on the Pi
-        self.conf_min = p('conf', 0.5).value
-        self.border = p('border_px', 8).value          # drop boxes this close to the image edge
+        self.imgsz = p('imgsz', 640).value            # YOLO input size; 320 is much faster on the Pi
+        self.conf_min = p('conf', 0.25).value
+        self.border = p('border_px', 0).value          # drop boxes this close to the image edge
         self.min_h = p('min_box_h_px', 12).value       # drop tiny (far / unreliable) boxes
         self.sigma_px = p('sigma_px', 3.0).value       # pixel noise of a box edge (tune from data)
-        self.image_is_rgb = p('image_is_rgb', True).value  # camera node says "rgb8"; YOLO wants BGR
+        self.image_is_rgb = p('image_is_rgb', False).value  # camera node says "rgb8"; YOLO wants BGR
         self.rectified = p('image_rectified', False).value  # true if the camera node already undistorts
         lm_file = p('landmarks_file', '').value
 

@@ -10,7 +10,7 @@ Writes:
     log_file CSV at 2 Hz: t, x, y, theta, sx, sy, stheta, n_updates   (report item i)
 
 Run:
-    ros2 run landmark_nav localizer --ros-args -p landmarks_file:=<path>/landmarks.yaml
+    ros2 run landmark_nav localizer --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml
 """
 import csv
 import json

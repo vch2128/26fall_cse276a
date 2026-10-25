@@ -33,6 +33,8 @@ setup(
             # 'keyboard_control = robot_control.keyboard_control:main',
             'velocity_control = robot_control.velocity_control:main',
             'calibrate = robot_control.calibrate:main',
+            'landmark_detector = robot_control.landmark_detector:main',
+            'hw2_control = robot_control.hw2_control:main',
         ],
     },
 )

@@ -46,7 +46,7 @@ class Localizer(Node):
 
         self.w_ccw = turn_rate(cal.CCW_TABLE, cal.L_rev + cal.R_fwd)    # left turns
         self.w_cw = turn_rate(cal.CW_TABLE, cal.L_fwd + cal.R_rev)      # right turns
-        self.cam_offset = p('cam_offset', 0.0).value                     # camera ahead of robot center (m)
+        self.cam_offset = p('cam_offset', 0.08).value                     # camera ahead of robot center (m)
         # process noise (std devs), tune from repeated HW1 runs
         self.s_ds = p('sigma_ds_per_m', 0.05).value                      # 5 cm per meter driven
         self.s_th_turn = p('sigma_th_per_rad', 0.10).value               # heading error per rad turned (open-loop)

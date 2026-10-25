@@ -20,7 +20,9 @@ from robot_control.motion import Motion, angle_diff, read_waypoints
 
 POS_TOL = 0.05                 # m: close enough to the waypoint
 ANG_TOL = math.radians(4)      # rad: close enough to the final heading (> MIN_TURN_DEG)
-MAX_TRIES = 3                  # correction attempts per waypoint
+STEP = 0.3                     # m: drive at most this far, then stop and look again
+MAX_STEPS = 30                 # safety: at most this many steps per waypoint
+MAX_TRIES = 3                  # heading correction attempts per waypoint
 SETTLE = 1.0                   # s standing still before reading the pose (detector gets several frames)
 
 motion = None                  # Motion bound to this node (set in main)
@@ -57,7 +59,8 @@ def main():
     try:
         for gx, gy, gth in waypoints[1:]:
             # --- position: turn to face the goal, drive, re-check, repeat
-            for _ in range(MAX_TRIES):
+                        # --- position: small steps toward the goal, look after every step
+            for _ in range(MAX_STEPS):
                 x, y, th, *_ = settle_and_read()
                 dist = math.hypot(gx - x, gy - y)
                 if dist < POS_TOL:
@@ -65,7 +68,7 @@ def main():
                 motion.turn(angle_diff(math.atan2(gy - y, gx - x), th))
                 x, y, th, *_ = settle_and_read()                     # re-aim with a fresh estimate
                 motion.turn(angle_diff(math.atan2(gy - y, gx - x), th))  # skipped if < MIN_TURN_DEG
-                motion.drive(math.hypot(gx - x, gy - y))
+                motion.drive(min(math.hypot(gx - x, gy - y), STEP))  # at most STEP, then look again
 
             # --- heading: turn to the waypoint's theta, re-check, repeat
             for _ in range(MAX_TRIES):

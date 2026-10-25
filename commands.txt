@@ -53,3 +53,11 @@ ros2 topic hz /camera/image_raw
 
 # camera
 sudo dmesg | grep -i "probe success"
+
+
+gst-launch-1.0 -e qtiqmmfsrc camera=0 ! video/x-raw,format=NV12,width=1280,height=720,framerate=10/1 ! jpegenc ! multifilesink location=$HOME/focus_%d.jpg max-files=1
+
+# take photos, store in focus_photos
+gst-launch-1.0 -e qtiqmmfsrc camera=0 ! video/x-raw,format=NV12,width=1280,height=720,framerate=10/1 ! jpegenc ! multifilesink location=$HOME/ros2_ws/src/26fall_cse276a/focus_photos/focus_$(date +%Y%m%d_%H%M%S)_%d.jpg max-files=1
+
+gst-launch-1.0 -e qtiqmmfsrc camera=0 ! video/x-raw,format=NV12,width=1280,height=720,framerate=10/1 ! jpegenc ! multifilesink location=$HOME/ros2_ws/src/26fall_cse276a/robot_control/test/test_photos/bottle_1.0m_$(date +%H%M%S)_%d.jpg max-files=1

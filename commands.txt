@@ -53,3 +53,14 @@ ros2 topic hz /camera/image_raw
 
 # camera
 sudo dmesg | grep -i "probe success"
+
+
+
+#run
+colcon build --packages-select landmark_nav
+
+ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml -p model:=yolo26n.pt
+
+ros2 run landmark_nav localizer --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml
+
+ros2 run landmark_nav closed_loop_control waypoints_hw2.txt

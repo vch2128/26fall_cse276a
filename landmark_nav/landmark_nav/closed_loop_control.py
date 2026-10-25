@@ -20,8 +20,8 @@ from robot_control.motion import Motion, angle_diff, read_waypoints
 
 POS_TOL = 0.05                 # m: close enough to the waypoint
 ANG_TOL = math.radians(4)      # rad: close enough to the final heading (> MIN_TURN_DEG)
-STEP = 0.3                     # m: drive at most this far, then stop and look again
-MAX_STEPS = 30                 # safety: at most this many steps per waypoint
+STEP = 0.25                     # m: drive at most this far, then stop and look again
+MAX_STEPS = 10                 # safety: at most this many steps per waypoint
 MAX_TRIES = 3                  # heading correction attempts per waypoint
 SETTLE = 1.0                   # s standing still before reading the pose (detector gets several frames)
 

@@ -1,0 +1,13 @@
+# class, x, y, height_m   (world frame: origin = start, x = start heading, y = left, meters)
+# class must be a COCO class name of the YOLO model (bottle, cup, chair, tv, teddy bear, ...)
+# height_m = effective height: put the object 1.0 m in front of the camera and adjust it until
+#            landmark_detector prints r = 1.0 (the box is usually a bit larger than the object)
+#
+# bottle:     ahead on leg 1 (0,0)->(1,0) and at the end (heading 0)
+# chair:      ahead on leg 2 (1,0)->(1,2)
+# teddy bear: seen at (1,2) facing pi
+# tv:         ahead on leg 3 (1,2)->(0,0)
+bottle, 2.0, 0.0, 0.23
+chair, 1.0, 3.0, 0.80
+teddy bear, -1.0, 2.0, 0.30
+tv, -0.5, -1.0, 0.40

@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""
+CSE 276A HW2 - test whether YOLO finds the landmark objects in a folder of photos.
+
+For every photo, every model and every input size:
+    - which target objects are found, with confidence and box height
+    - estimated distance from the known object height (same math as landmark_detector.py)
+    - an annotated copy of the photo
+    - inference time (decides which model can run on the RUBIK Pi)
+
+If a file name contains the true distance, e.g. bottle_1.0m_01.jpg or keyboard_0.5m.jpg,
+the distance error is computed too (for report item (e)).
+
+Run (works on the Pi or a laptop, no ROS needed):
+    python3 yolo_test.py ~/ros2_ws/src/26fall_cse276a/yolo_photos \
+        --calib ~/ros2_ws/src/26fall_cse276a/robot_control/config/camera_calibration.yaml
+    python3 yolo_test.py PHOTOS --models yolo26n.pt yolo26s.pt --imgsz 640 1280 --wb
+
+Outputs in PHOTOS/yolo_results/:
+    <model>_<imgsz>/<photo>.jpg   annotated photos
+    results.csv                   one row per (photo, model, imgsz, object)
+    and a summary printed at the end
+"""
+import argparse
+import csv
+import glob
+import os
+import re
+import statistics
+import time
+
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+# COCO class names exactly as YOLO spells them (use these in landmarks.txt too!)
+# Real object heights in meters - MEASURE YOURS and change these.
+HEIGHTS = {
+    'bottle':     0.23,
+    'keyboard':   0.03,   # lying flat it is very thin; standing up use its width/height
+    'wine glass': 0.20,
+    'hair drier': 0.22,   # COCO spells it "drier"
+    'cell phone': 0.15,   # standing up
+}
+EDGE = 5                  # px, box touching top/bottom edge is cut off: height is wrong
+
+
+def gray_world(img):
+    """Simple white balance: make the average of B, G, R equal (removes the green tint)."""
+    f = img.astype(np.float32)
+    avg = f.reshape(-1, 3).mean(axis=0)
+    f *= avg.mean() / np.maximum(avg, 1e-6)
+    return np.clip(f, 0, 255).astype(np.uint8)
+
+
+def true_distance(name):
+    m = re.search(r'_(\d+(?:\.\d+)?)m', os.path.basename(name))
+    return float(m.group(1)) if m else None
+
+
+def distance(box, K, D, height, img_h):
+    """forward, left (m) from the box, like landmark_detector.py. None if box is cut off."""
+    x1, y1, x2, y2 = box
+    if K is None or y1 < EDGE or y2 > img_h - EDGE:
+        return None, None
+    xc = (x1 + x2) / 2
+    pts = np.array([[[xc, y1]], [[xc, y2]]], dtype=np.float64)
+    (xt, yt), (xb, yb) = cv2.undistortPoints(pts, K, D).reshape(-1, 2)
+    z = height / (yb - yt)
+    return z, -(xt + xb) / 2 * z
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('folder')
+    p.add_argument('--models', nargs='+', default=['yolo26n.pt', 'yolo26s.pt'])
+    p.add_argument('--imgsz', nargs='+', type=int, default=[640, 1280])
+    p.add_argument('--conf', type=float, default=0.25, help='low on purpose, to see weak hits')
+    p.add_argument('--calib', default=None, help='camera yaml (camera_matrix, distortion_coefficients)')
+    p.add_argument('--wb', action='store_true', help='apply gray-world white balance first')
+    args = p.parse_args()
+
+    folder = os.path.expanduser(args.folder)
+    files = sorted(glob.glob(os.path.join(folder, '*.jpg')) + glob.glob(os.path.join(folder, '*.png')))
+    if not files:
+        raise SystemExit(f'no photos in {folder}')
+
+    K = D = None
+    if args.calib:
+        fs = cv2.FileStorage(os.path.expanduser(args.calib), cv2.FILE_STORAGE_READ)
+        K = fs.getNode('camera_matrix').mat()
+        D = fs.getNode('distortion_coefficients').mat()
+        fs.release()
+        if K is None or D is None:
+            raise SystemExit(f'could not read camera_matrix / distortion_coefficients from {args.calib}')
+
+    out_root = os.path.join(folder, 'yolo_results')
+    os.makedirs(out_root, exist_ok=True)
+    rows = []
+
+    for model_name in args.models:
+        model = YOLO(model_name)
+        missing = [n for n in HEIGHTS if n not in model.names.values()]
+        if missing:
+            print(f'WARNING {model_name}: not a class name: {missing}')
+
+        for imgsz in args.imgsz:
+            tag = f'{os.path.splitext(model_name)[0]}_{imgsz}'
+            out_dir = os.path.join(out_root, tag)
+            os.makedirs(out_dir, exist_ok=True)
+            times = []
+            print(f'\n===== {tag}: {len(files)} photos =====')
+
+            for i, f in enumerate(files):
+                img = cv2.imread(f)
+                if img is None:
+                    continue
+                if args.wb:
+                    img = gray_world(img)
+
+                t0 = time.perf_counter()
+                res = model(img, imgsz=imgsz, conf=args.conf, verbose=False)[0]
+                dt = time.perf_counter() - t0
+                if i > 0:                       # first run includes warm-up
+                    times.append(dt)
+
+                best = {}
+                for b in res.boxes:
+                    name = model.names[int(b.cls)]
+                    c = float(b.conf)
+                    if name in HEIGHTS and c > best.get(name, (0.0,))[0]:
+                        best[name] = (c, b.xyxy[0].tolist())
+
+                truth = true_distance(f)
+                found = []
+                for name, (c, box) in best.items():
+                    fwd, left = distance(box, K, D, HEIGHTS[name], img.shape[0])
+                    err = (fwd - truth) if (fwd is not None and truth is not None) else None
+                    rows.append([os.path.basename(f), tag, name, f'{c:.2f}',
+                                 f'{box[3] - box[1]:.0f}',
+                                 '' if fwd is None else f'{fwd:.3f}',
+                                 '' if left is None else f'{left:.3f}',
+                                 '' if truth is None else truth,
+                                 '' if err is None else f'{err:+.3f}', f'{dt * 1000:.0f}'])
+                    d = '' if fwd is None else f' {fwd:.2f}m'
+                    found.append(f'{name} {c:.2f}{d}')
+                if not best:
+                    rows.append([os.path.basename(f), tag, '(none)', '', '', '', '', truth or '', '',
+                                 f'{dt * 1000:.0f}'])
+
+                cv2.imwrite(os.path.join(out_dir, os.path.basename(f)), res.plot())
+                print(f'  {os.path.basename(f):30s} {dt * 1000:5.0f} ms  '
+                      f'{", ".join(found) if found else "-- nothing --"}')
+
+            if times:
+                print(f'  -> average {statistics.mean(times) * 1000:.0f} ms/photo '
+                      f'(~{1 / statistics.mean(times):.1f} fps)')
+
+    with open(os.path.join(out_root, 'results.csv'), 'w', newline='') as fh:
+        w = csv.writer(fh)
+        w.writerow(['photo', 'model_imgsz', 'object', 'conf', 'box_h_px',
+                    'forward_m', 'left_m', 'true_m', 'error_m', 'ms'])
+        w.writerows(rows)
+
+    # summary: detection rate and mean |error| per object, per model/imgsz
+    print('\n===== summary (photos where the object was found / mean conf / mean |dist error|) =====')
+    tags = sorted({r[1] for r in rows})
+    for tag in tags:
+        print(f'\n{tag}')
+        for name in HEIGHTS:
+            hits = [r for r in rows if r[1] == tag and r[2] == name]
+            if not hits:
+                print(f'  {name:11s} never found')
+                continue
+            confs = [float(r[3]) for r in hits]
+            errs = [abs(float(r[8])) for r in hits if r[8] != '']
+            e = f'  |err| {statistics.mean(errs):.3f} m' if errs else ''
+            print(f'  {name:11s} {len(hits):3d} photos  conf {statistics.mean(confs):.2f}{e}')
+    print(f'\nannotated photos + results.csv in {out_root}')
+
+
+if __name__ == '__main__':
+    main()

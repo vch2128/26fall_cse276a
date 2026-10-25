@@ -38,7 +38,7 @@ from robot_control.motion import Motion, angle_diff
 
 # ---- checkpoints
 N_CHECKPOINTS = 2                  # stops (pose check + re-aim) between the start of a leg and the waypoint
-MIN_SEGMENT = 0.30                 # m: never split a leg into drives shorter than this
+MIN_SEGMENT = 0.25                 # m: never split a leg into drives shorter than this
 # ---- tolerances / gentleness
 POS_TOL = 0.08                     # m: close enough to the waypoint
 NEAR = 0.20                        # m: inside this, only drive forward/backward, never turn to face the goal
@@ -46,7 +46,7 @@ ANG_TOL = math.radians(6)          # rad: close enough to the final heading
 HEADING_GAIN = 0.7                 # fraction of a small heading error corrected per try
 DAMP_BELOW = math.radians(30)      # heading errors larger than this are turned in full
 MAX_TRIES = 3                      # final-approach / heading attempts per waypoint
-SETTLE = 1.5                       # s standing still before reading the pose (detector needs a few frames)
+SETTLE = 2                         # s standing still before reading the pose (detector needs a few frames)
 # ---- landmark search
 SEARCH_STEP = math.radians(30)     # rad per search turn (CCW)
 SEARCH_MAX_STEPS = 12              # 12 x 30 deg = one full circle

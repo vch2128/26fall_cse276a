@@ -63,11 +63,7 @@ class Localizer(Node):
         super().__init__('landmark_localizer')
         p = self.declare_parameter
         x0 = [float(v) for v in p('start_pose', [0.0, 0.0, 0.0]).value]
-        # Odometry uses the same time -> motion model as the controllers (robot_control/motion.py):
-        # a drive lasting T s moves T / SECONDS_PER_METER, a spin lasting T s turns
-        # table_angle(T) (inverse of the measured turn tables). The calibration was measured
-        # with the start-up ramp included, so this also counts short drives / small turns
-        # correctly, and re-calibrating in motion.py updates the localizer too. No IMU.
+        # Odometry uses the same time -> motion model as the controllers (robot_control/motion.py)
         self.cam_offset = p('cam_offset', 0.0).value                     # camera ahead of robot center (m)
         # process noise (std devs), tune from repeated HW1 runs
         self.s_ds = p('sigma_ds_per_m', 0.05).value                      # 5 cm per meter driven

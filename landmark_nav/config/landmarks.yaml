@@ -13,8 +13,8 @@
 # TODO: these positions are a starting suggestion for the path
 #   (0,0,0) -> (1,0,0) -> (1,2,pi) -> (0,0,0); measure the real values.
 landmarks:
-  cup:     {x: -0.2,  y: -0.2,  height: 0.115}   # ahead on leg 1, and at the final pose (facing +x)
-  wine glass:   {x: 0.0,  y: 1.0,  height: 0.215}   # ahead on leg 2 (facing +y)
-  suitcase:       {x: 1.0, y: 1.6,  height: 0.43}   # seen at waypoint 2 (facing -x, theta = pi)
-  bottle:       {x: 1.75, y: 0.0, height: 0.195}   # ahead on leg 3 (driving back toward the origin)
-  # laptop:       {x: 0.0,  y: 1.0, height: 0.30}   # seen at waypoint 3 (facing +x, theta = 0)
+  cup:        {x: 0.5, y: 2.0, height: 0.115} #0.115
+  wine glass: {x: 1.4, y: 0.0, height: 0.215}
+  bowl:       {x: 1.0, y: 2.3, height: 0.085}
+  bottle:     {x: 1.4, y: 1.0, height: 0.115}
+  laptop:     {x: -0.4, y: -0.4, height: 0.227}   # seen at waypoint 3 (facing +x, theta = 0)ß

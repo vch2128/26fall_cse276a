@@ -1,0 +1,8 @@
+[0.000000] (-) TimerEvent: {}
+[0.001049] (-) JobUnselected: {'identifier': 'apriltag_ros'}
+[0.001412] (-) JobUnselected: {'identifier': 'robot_control'}
+[0.001598] (-) JobUnselected: {'identifier': 'robot_vision_camera'}
+[0.001724] (landmark_nav) JobQueued: {'identifier': 'landmark_nav', 'dependencies': OrderedDict({'robot_control': '/home/ubuntu/ros2_ws/src/26fall_cse276a/install/robot_control'})}
+[0.001896] (landmark_nav) JobStarted: {'identifier': 'landmark_nav'}
+[0.015236] (landmark_nav) JobEnded: {'identifier': 'landmark_nav', 'rc': 1}
+[0.026485] (-) EventReactorShutdown: {}

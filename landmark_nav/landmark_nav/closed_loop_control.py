@@ -46,7 +46,7 @@ ANG_TOL = math.radians(6)          # rad: close enough to the final heading
 HEADING_GAIN = 0.7                 # fraction of a small heading error corrected per try
 DAMP_BELOW = math.radians(30)      # heading errors larger than this are turned in full
 MAX_TRIES = 3                      # final-approach / heading attempts per waypoint
-SETTLE = 2                         # s standing still before reading the pose (detector needs a few frames)
+SETTLE = 5                         # s standing still before reading the pose (detector needs a few frames)
 # ---- landmark search
 SEARCH_STEP = math.radians(30)     # rad per search turn (CCW)
 SEARCH_MAX_STEPS = 12              # 12 x 30 deg = one full circle
@@ -100,7 +100,8 @@ def observe():
     """Stop, let the localizer correct the pose (searching if needed), return (x, y, theta)."""
     seen = wait_for_landmark(SETTLE)
     if not seen and n_updates is not None and uncertain():
-        search()
+        print('no landmark in view and pose is uncertain.')
+        # search()
     return pose[:3]
 
 
@@ -128,20 +129,20 @@ def go_to(gx, gy):
         print(f'  checkpoint: est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  {dist:.3f} m to go')
 
     # 2. final approach: gentle corrections only
-    for _ in range(MAX_TRIES):
-        dx, dy = gx - x, gy - y
-        dist = math.hypot(dx, dy)
-        if dist < POS_TOL:
-            return
-        if dist > NEAR:                            # still far off: face the goal and drive
-            motion.turn(angle_diff(math.atan2(dy, dx), th))
-            motion.drive(dist)
-        else:                                      # close: only move along the current heading
-            along = dx * math.cos(th) + dy * math.sin(th)
-            if abs(along) < POS_TOL:
-                return                             # what is left is sideways: accept it
-            drive_signed(along)
-        x, y, th = observe()
+    # for _ in range(MAX_TRIES):
+    #     dx, dy = gx - x, gy - y
+    #     dist = math.hypot(dx, dy)
+    #     if dist < POS_TOL:
+    #         return
+    #     if dist > NEAR:                            # still far off: face the goal and drive
+    #         motion.turn(angle_diff(math.atan2(dy, dx), th))
+    #         motion.drive(dist)
+    #     else:                                      # close: only move along the current heading
+    #         along = dx * math.cos(th) + dy * math.sin(th)
+    #         if abs(along) < POS_TOL:
+    #             return                             # what is left is sideways: accept it
+    #         drive_signed(along)
+    #     x, y, th = observe()
 
 
 def face(gth):

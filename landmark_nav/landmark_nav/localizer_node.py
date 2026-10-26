@@ -66,9 +66,9 @@ class Localizer(Node):
         # Odometry uses the same time -> motion model as the controllers (robot_control/motion.py)
         self.cam_offset = p('cam_offset', 0.08).value                     # camera ahead of robot center (m)
         # process noise (std devs), tune from repeated HW1 runs
-        self.s_ds = p('sigma_ds_per_m', 0.05).value                      # 5 cm per meter driven
-        self.s_th_turn = p('sigma_th_per_rad', 0.10).value               # heading error per rad turned (open-loop)
-        self.s_th_drive = p('sigma_th_per_m', 0.03).value                # heading drift per meter driven
+        self.s_ds = p('sigma_ds_per_m', 0.03).value                      # 5 cm per meter driven
+        self.s_th_turn = p('sigma_th_per_rad', 0.3).value               # heading error per rad turned (open-loop)
+        self.s_th_drive = p('sigma_th_per_m', 0.18).value                # heading drift per meter driven
         # measurement handling
         self.min_sr = p('min_sigma_r', 0.03).value
         self.min_sb = p('min_sigma_b', math.radians(1.0)).value

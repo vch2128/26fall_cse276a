@@ -38,8 +38,6 @@ class LandmarkDetector(Node):
         self.border = p('border_px', 5).value          # drop boxes this close to the image edge
         self.min_h = p('min_box_h_px', 12).value       # drop tiny (far / unreliable) boxes
         self.sigma_px = p('sigma_px', 3.0).value       # pixel noise of a box edge (tune from data)
-        self.image_is_rgb = p('image_is_rgb', False).value  # camera node says "rgb8"; YOLO wants BGR
-        self.rectified = p('image_rectified', False).value  # true if the camera node already undistorts
         lm_file = p('landmarks_file', '').value
 
         lm = yaml.safe_load(open(lm_file))['landmarks']
@@ -60,7 +58,7 @@ class LandmarkDetector(Node):
     def on_info(self, msg):
         if self.K is None:
             self.K = np.array(msg.k, dtype=np.float64).reshape(3, 3)
-            self.D = np.zeros(5) if self.rectified else np.array(msg.d, dtype=np.float64)
+            self.D = np.array(msg.d, dtype=np.float64)
             self.get_logger().info(f'camera K =\n{self.K}\nD = {self.D}')
 
     @staticmethod
@@ -73,8 +71,6 @@ class LandmarkDetector(Node):
         if self.K is None:
             return
         img = self.to_numpy(msg)
-        if self.image_is_rgb:
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         H, W = img.shape[:2]
 
         # Run YOLO on the raw (distorted) image; only the box corners get undistorted.

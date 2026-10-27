@@ -63,12 +63,11 @@ class Localizer(Node):
         super().__init__('landmark_localizer')
         p = self.declare_parameter
         x0 = [float(v) for v in p('start_pose', [0.0, 0.0, 0.0]).value]
-        # Odometry uses the same time -> motion model as the controllers (robot_control/motion.py)
         self.cam_offset = p('cam_offset', 0.08).value                     # camera ahead of robot center (m)
-        # process noise (std devs), tune from repeated HW1 runs
-        self.s_ds = p('sigma_ds_per_m', 0.03).value                      # 5 cm per meter driven
-        self.s_th_turn = p('sigma_th_per_rad', 0.3).value               # heading error per rad turned (open-loop)
-        self.s_th_drive = p('sigma_th_per_m', 0.18).value                # heading drift per meter driven
+        # process noise: std after 1 m / 1 rad of motion (variance grows linearly with motion)
+        self.s_ds = p('sigma_ds_per_m', 0.03).value                      # 3 cm after 1 m driven
+        self.s_th_turn = p('sigma_th_per_rad', 0.3).value                # ~17 deg after 1 rad turned
+        self.s_th_drive = p('sigma_th_per_m', 0.18).value                # ~10 deg heading drift after 1 m driven
         # measurement handling
         self.min_sr = p('min_sigma_r', 0.03).value
         self.min_sb = p('min_sigma_b', math.radians(1.0)).value

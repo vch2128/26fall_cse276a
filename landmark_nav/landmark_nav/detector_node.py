@@ -11,7 +11,8 @@ Publishes:   landmark_obs (std_msgs/String, JSON):
     sr, sb = 1-sigma uncertainty of r and b
 
 Only classes listed in landmarks.yaml are reported, at most one box per class
-(the most confident one), so each class must be a unique object in the room.
+(the most confident one that is not cut off by the image edge and not too small),
+so each class must be a unique object in the room.
 
 Run:
     ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml -p model:=yolo26n.pt

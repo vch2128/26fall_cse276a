@@ -59,6 +59,7 @@ n_updates = None                   # landmark updates accepted by the localizer 
 
 
 def on_pose(msg):
+    # reveive pos form localizer
     global pose
     q = msg.pose.pose.orientation
     c = msg.pose.covariance
@@ -67,6 +68,7 @@ def on_pose(msg):
 
 
 def on_updates(msg):
+    # bf:37 -> wait 5s -> af: n_updates = 40 => during this period, see a landmark
     global n_updates
     n_updates = msg.data
 
@@ -146,6 +148,7 @@ def go_to(gx, gy):
 
 
 def face(gth):
+    # turn to waypoint's direction
     for _ in range(MAX_TRIES):
         _, _, th = observe()
         err = angle_diff(gth, th)

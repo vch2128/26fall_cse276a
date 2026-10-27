@@ -72,11 +72,11 @@ class Localizer(Node):
         # measurement handling
         self.min_sr = p('min_sigma_r', 0.03).value
         self.min_sb = p('min_sigma_b', math.radians(1.0)).value
-        self.max_age = p('max_obs_age', 0.4).value                       # s; older images are stale (while moving)
+        self.max_age = p('max_obs_age', 0.4).value                       # s; older images are stale (while moving) # not used
         self.max_still_age = p('max_still_obs_age', 3.0).value           # s; image taken while standing still
         self.still_margin = p('still_margin', 0.3).value                 # s after a motion before the robot is still
         self.max_w = p('max_turn_rate_for_update', 0.4).value            # rad/s; skip blurry frames
-        self.use_range = p('use_range', True).value
+        self.use_range = p('use_range', True).value                      # not used
         lm_file = p('landmarks_file', '').value
         log_file = os.path.expanduser(p('log_file', '~/ros2_ws/logs/trajectory.csv').value)
 

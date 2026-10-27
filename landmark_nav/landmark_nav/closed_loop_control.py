@@ -100,8 +100,8 @@ def observe():
     """Stop, let the localizer correct the pose (searching if needed), return (x, y, theta)."""
     seen = wait_for_landmark(SETTLE)
     if not seen and n_updates is not None and uncertain():
-        print('no landmark in view and pose is uncertain.')
-        # search()
+        print('no landmark in view and pose is uncertain, searching ...')
+        search()
     return pose[:3]
 
 
@@ -115,7 +115,7 @@ def drive_signed(d):
 
 
 def go_to(gx, gy):
-    # 1. leg with checkpoints: re-aim at the waypoint before each drive
+    # leg with checkpoints: re-aim at the waypoint before each drive
     x, y, th = observe()
     dist = math.hypot(gx - x, gy - y)
     n_drives = max(1, min(N_CHECKPOINTS + 1, math.ceil(dist / MIN_SEGMENT)))
@@ -127,22 +127,6 @@ def go_to(gx, gy):
         x, y, th = observe()
         dist = math.hypot(gx - x, gy - y)
         print(f'  checkpoint: est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  {dist:.3f} m to go')
-
-    # 2. final approach: gentle corrections only
-    # for _ in range(MAX_TRIES):
-    #     dx, dy = gx - x, gy - y
-    #     dist = math.hypot(dx, dy)
-    #     if dist < POS_TOL:
-    #         return
-    #     if dist > NEAR:                            # still far off: face the goal and drive
-    #         motion.turn(angle_diff(math.atan2(dy, dx), th))
-    #         motion.drive(dist)
-    #     else:                                      # close: only move along the current heading
-    #         along = dx * math.cos(th) + dy * math.sin(th)
-    #         if abs(along) < POS_TOL:
-    #             return                             # what is left is sideways: accept it
-    #         drive_signed(along)
-    #     x, y, th = observe()
 
 
 def face(gth):

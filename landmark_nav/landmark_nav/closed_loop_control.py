@@ -1,25 +1,29 @@
 #!/usr/bin/env python3
-"""HW2 closed-loop waypoint controller.
+"""HW3 controller: drives a square or octagon (several laps) while the SLAM node builds the map.
 
-HW1's timed turn / drive motions, steered by the localizer's pose (robot_pose)
-instead of dead reckoning. The first waypoint is the start; for each next one:
+HW1's timed turn / drive motions, steered by the SLAM pose (robot_pose).
+Waypoints are relative to the start pose (the SLAM map origin): the robot starts at
+(0, 0) heading +x and turns left (CCW) at every corner. For each waypoint:
 
 1. Leg (go_to): up to N_CHECKPOINTS + 1 drives (none shorter than MIN_SEGMENT).
    Before each: face the waypoint, drive remaining / drives_left, re-read pose.
 2. Within NEAR: stop the leg and accept the residual error (no small-error turns).
-3. Heading (face): up to MAX_TRIES turns until within ANG_TOL; errors below
-   DAMP_BELOW are scaled by HEADING_GAIN to avoid oscillation.
+3. Heading (face, only for waypoint files with a heading): up to MAX_TRIES turns until
+   within ANG_TOL; errors below DAMP_BELOW are scaled by HEADING_GAIN to avoid oscillation.
 
-Before every pose read (observe) the robot waits SETTLE s for a landmark update;
+Before every pose read (observe) the robot waits SETTLE s for a landmark observation;
 if none came and the pose is uncertain, it turns CCW by SEARCH_STEP until a
-landmark is seen (max one full circle).
+landmark is seen (max one full circle). Set SEARCH = False to disable.
 
 Run (motor_control, camera, detector and localizer must be running):
-    ros2 run landmark_nav closed_loop_control waypoints_hw2.txt
+    ros2 run landmark_nav closed_loop_control square 1.2 2      # 1.2 m square, 2 laps
+    ros2 run landmark_nav closed_loop_control octagon 0.5 2     # octagon with 0.5 m sides, 2 laps
+    ros2 run landmark_nav closed_loop_control my_waypoints.txt  # x, y, theta per line (HW2 format)
 """
 import math
 import os
 import sys
+import time
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
@@ -40,6 +44,7 @@ DAMP_BELOW = math.radians(30)      # heading errors larger than this are turned 
 MAX_TRIES = 3                      # heading-correction attempts per waypoint
 SETTLE = 5                         # s standing still before reading the pose (detector needs a few frames)
 # ---- landmark search
+SEARCH = True                      # turn in place to look for a landmark when lost
 SEARCH_STEP = math.radians(30)     # rad per search turn (CCW)
 SEARCH_MAX_STEPS = 12              # 12 x 30 deg = one full circle
 SEARCH_SIGMA_XY = 0.05             # m: only search when the pose is at least this uncertain ...
@@ -91,7 +96,7 @@ def search():
 def observe():
     """Stop, let the localizer correct the pose (searching if needed), return (x, y, theta)."""
     seen = wait_for_landmark(SETTLE)
-    if not seen and n_updates is not None and uncertain():
+    if SEARCH and not seen and n_updates is not None and uncertain():
         print('no landmark in view and pose is uncertain, searching ...')
         search()
     return pose[:3]
@@ -137,7 +142,20 @@ def load_waypoints(name):
             x, y, theta = line.split(',')
             points.append((float(x), float(y), float(theta)))
     print(f'waypoints from {path}: {points}')
-    return points
+    return points[1:], len(points) - 1                # first point = start; the whole file is one lap
+
+
+def make_path(kind, size, laps):
+    """Corners of a square (4 sides) or octagon (8 sides) with side `size` m, starting at (0, 0)
+    heading +x and turning left, repeated `laps` times. Heading None = no face() at corners."""
+    sides, turn = {'square': (4, math.pi / 2), 'octagon': (8, math.pi / 4)}[kind]
+    points, x, y, th = [], 0.0, 0.0, 0.0
+    for _ in range(laps * sides):
+        x, y = x + size * math.cos(th), y + size * math.sin(th)
+        points.append((round(x, 4) + 0.0, round(y, 4) + 0.0, None))
+        th += turn
+    print(f'{kind}: side {size} m ({size / 0.3048:.1f} ft), {laps} lap(s), {len(points)} waypoints')
+    return points, sides
 
 
 def main():
@@ -148,28 +166,30 @@ def main():
     node.create_subscription(PoseWithCovarianceStamped, 'robot_pose', on_pose, 10)
     node.create_subscription(Int32, 'landmark_updates', on_updates, 10)
 
-    waypoints =  load_waypoints(sys.argv[1] if len(sys.argv) > 1 else 'waypoints_hw2.txt')
+    args = sys.argv[1:]
+    if args and args[0] in ('square', 'octagon'):
+        size = float(args[1]) if len(args) > 1 else 1.2
+        laps = int(args[2]) if len(args) > 2 else 1
+        waypoints, per_lap = make_path(args[0], size, laps)
+    else:
+        waypoints, per_lap = load_waypoints(args[0] if args else 'waypoints_hw3.txt')
     while (pose is None or n_updates is None) and rclpy.ok():
         node.get_logger().info('waiting for robot_pose and landmark_updates ...', throttle_duration_sec=2.0)
         motion.spin_for(0.1)
 
-    results = []
+    t_start = time.monotonic()
     try:
-        for gx, gy, gth in waypoints[1:]:
-            print(f'--> waypoint ({gx}, {gy}, {gth:.2f})')
+        for k, (gx, gy, gth) in enumerate(waypoints, 1):
+            print(f'--> waypoint {k}/{len(waypoints)} ({gx}, {gy})')
             go_to(gx, gy)
-            face(gth)
-            motion.stop(SETTLE)
-            x, y, th, sx, sy, sth = pose
-            results.append((gx, gy, gth, x, y, th))
-            print(f'reached ({gx}, {gy}, {gth:.2f})  est=({x:.3f}, {y:.3f}, {th:.3f})  '
-                  f'sigma=({sx:.3f}, {sy:.3f}, {math.degrees(sth):.1f}deg)')
-
-        print('\nwaypoint  target -> estimated (also tape-measure the real pose!)')
-        for gx, gy, gth, x, y, th in results:
-            print(f'({gx}, {gy}, {gth:.2f}) -> ({x:.3f}, {y:.3f}, {th:.3f})  '
-                  f'pos err {math.hypot(gx - x, gy - y):.3f} m, '
-                  f'ang err {math.degrees(angle_diff(gth, th)):+.1f} deg')
+            if gth is not None:
+                face(gth)
+            if k % per_lap == 0:                   # end of a lap (back at the start corner)
+                motion.stop(SETTLE)
+                x, y, th, sx, sy, sth = pose
+                print(f'== lap {k // per_lap} done at t = {time.monotonic() - t_start:.0f} s: '
+                      f'est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  '
+                      f'sigma=({sx:.3f}, {sy:.3f}, {math.degrees(sth):.1f}deg)')
     except KeyboardInterrupt:
         pass
     finally:

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""EKF localizer: dead reckoning (motor commands only, no IMU) fused with landmark observations.
+"""EKF-SLAM node: dead reckoning (motor commands only, no IMU) fused with landmark observations,
+estimating the robot pose AND the landmark map. No map is given: a landmark is added the first
+time its id is seen. The map frame is the (unknown) start pose: (0, 0, 0).
 
 Subscribes:
     motor_commands (std_msgs/Float32MultiArray [L, R])   -> odometry (same timing model as robot_control/motion.py)
-    landmark_obs   (std_msgs/String JSON, from detector) -> EKF updates
+    landmark_obs   (std_msgs/String JSON, from detector) -> new landmarks / EKF updates
 Publishes:
     robot_pose       (geometry_msgs/PoseWithCovarianceStamped, frame "map"), 20 Hz
-    landmark_updates (std_msgs/Int32): number of landmark updates accepted so far, 20 Hz
-Writes:
-    log_file CSV at 2 Hz: t, x, y, theta, sx, sy, stheta, n_updates   (report item i)
+    landmark_updates (std_msgs/Int32): landmark observations used so far (new + accepted), 20 Hz
+    landmark_map     (std_msgs/String JSON {id: [x, y, sxx, sxy, syy]}), 1 Hz
+Writes (every 0.5 s):
+    log_file     CSV: t, x, y, theta, sx, sy, stheta, n_updates, n_landmarks
+    map_log_file CSV: t, id, x, y, sxx, sxy, syy   (one row per landmark: the map at any time)
 
 Run:
-    ros2 run landmark_nav localizer --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml
+    ros2 run landmark_nav localizer
 """
 import csv
 import json
@@ -21,14 +25,13 @@ import time
 
 import numpy as np
 import rclpy
-import yaml
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, Int32, String
 
 from spatialmath import UnitQuaternion
 
-from landmark_nav.ekf import PoseEKF
+from landmark_nav.ekf import SlamEKF
 from robot_control import motion as cal        # the calibration the controllers use
 
 
@@ -62,7 +65,6 @@ class Localizer(Node):
     def __init__(self):
         super().__init__('landmark_localizer')
         p = self.declare_parameter
-        x0 = [float(v) for v in p('start_pose', [0.0, 0.0, 0.0]).value]
         self.cam_offset = p('cam_offset', 0.08).value                     # camera ahead of robot center (m)
         # process noise: std after 1 m / 1 rad of motion (variance grows linearly with motion)
         self.s_ds = p('sigma_ds_per_m', 0.03).value                      # 3 cm after 1 m driven
@@ -71,29 +73,22 @@ class Localizer(Node):
         # measurement handling
         self.min_sr = p('min_sigma_r', 0.03).value
         self.min_sb = p('min_sigma_b', math.radians(1.0)).value
-        self.max_age = p('max_obs_age', 0.4).value                       # s; older images are stale (while moving)
         self.max_still_age = p('max_still_obs_age', 3.0).value           # s; image taken while standing still
         self.still_margin = p('still_margin', 0.3).value                 # s after a motion before the robot is still
-        self.max_w = p('max_turn_rate_for_update', 0.4).value            # rad/s; skip blurry frames
-        self.use_range = p('use_range', True).value
-        lm_file = p('landmarks_file', '').value
+        self.max_range = p('max_range', 3.0).value                       # m; farther detections are too noisy
         log_file = os.path.expanduser(p('log_file', '~/ros2_ws/logs/trajectory.csv').value)
+        map_log_file = os.path.expanduser(p('map_log_file', '~/ros2_ws/logs/map.csv').value)
 
-        lm = yaml.safe_load(open(lm_file))['landmarks']
-        self.map = {name: (float(v['x']), float(v['y'])) for name, v in lm.items()}
-
-        P0 = np.diag([0.02 ** 2, 0.02 ** 2, math.radians(2) ** 2])
-        self.ekf = PoseEKF(x0, P0, self.map, self.cam_offset)
+        # Unknown start pose: the start pose IS the map origin, so x0 = 0 and P0 ~ 0; empty map.
+        self.ekf = SlamEKF(self.cam_offset)
 
         self.cmd_time = 0.0
         self.seg = None              # current motion: (kind, sign, start time) or None
         self.seg_done = 0.0          # meters / degrees of the current motion already predicted
         self.pending = [0.0, 0.0]    # ds, dtheta not yet given to the EKF
-        self.w = 0.0                 # current turn rate (rad/s)
         self.last_motion = 0.0       # ROS time (s) the robot was last moving
-        self.n_updates = 0
+        self.n_updates = 0           # landmark observations used (new + accepted)
         self.n_rejected_in_row = 0
-        self.last_t = time.monotonic()
 
         self.create_subscription(Float32MultiArray, 'motor_commands', self.on_cmd, 10)
         self.create_subscription(String, 'landmark_obs', self.on_obs, 10)
@@ -101,13 +96,19 @@ class Localizer(Node):
         self.upd_pub = self.create_publisher(Int32, 'landmark_updates', 10)
         self.create_timer(0.05, self.on_timer)        # predict + publish, 20 Hz
         self.create_timer(0.5, self.on_log)           # trajectory dot every 0.5 s
+        self.map_pub = self.create_publisher(String, 'landmark_map', 10)
+        self.create_timer(1.0, self.publish_map)
 
-        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        for f in (log_file, map_log_file):
+            os.makedirs(os.path.dirname(f), exist_ok=True)
         self.log_f = open(log_file, 'w', newline='')
         self.log = csv.writer(self.log_f)
-        self.log.writerow(['t', 'x', 'y', 'theta', 'sx', 'sy', 'stheta', 'n_updates'])
+        self.log.writerow(['t', 'x', 'y', 'theta', 'sx', 'sy', 'stheta', 'n_updates', 'n_landmarks'])
+        self.map_f = open(map_log_file, 'w', newline='')
+        self.map_log = csv.writer(self.map_f)
+        self.map_log.writerow(['t', 'id', 'x', 'y', 'sxx', 'sxy', 'syy'])
         self.t0 = time.monotonic()
-        self.get_logger().info(f'start pose {x0}, landmarks {self.map}')
+        self.get_logger().info('SLAM started: map origin = start pose, empty map')
 
     # ------------------------------------------------------------------ inputs
     def on_cmd(self, msg):
@@ -143,7 +144,6 @@ class Localizer(Node):
     # ----------------------------------------------------------------- predict
     def on_timer(self):
         now = time.monotonic()
-        dt, self.last_t = now - self.last_t, now
 
         if self.seg and now - self.cmd_time > 0.15:   # commands stopped -> motor_control stops the robot
             self.advance(self.cmd_time + 0.05)
@@ -151,7 +151,6 @@ class Localizer(Node):
         self.advance(now)
         ds, dth = self.pending
         self.pending = [0.0, 0.0]
-        self.w = dth / dt if dt > 0 else 0.0
         if self.seg or ds or dth:
             self.last_motion = self.get_clock().now().nanoseconds * 1e-9
 
@@ -166,35 +165,36 @@ class Localizer(Node):
         data = json.loads(msg.data)
         stamp = data['stamp']
         age = self.get_clock().now().nanoseconds * 1e-9 - stamp
-        spinning = (self.seg is not None and self.seg[0] == 'spin') or abs(self.w) > self.max_w
-        # Photo taken while standing still: the pose hasn't changed since, so it may be older
-        # (YOLO on the Pi is slow). Photo taken while moving: only if fresh and not turning.
+        # Only photos taken after the robot has stood still: the pose hasn't changed since,
+        # so the photo may be older (YOLO on the Pi is slow).
         still = stamp > self.last_motion + self.still_margin and age < self.max_still_age
-        fresh = age <= self.max_age and not spinning
-        if not (still or fresh):
+        if not still:
             return
         for o in data['obs']:
-            if o['id'] not in self.map:
+            if o['r'] > self.max_range:                 # too far: range too noisy (could misplace a new landmark)
                 continue
             sr = max(o['sr'], self.min_sr)
             sb = max(o['sb'], self.min_sb)
-            if not self.use_range:
-                sr = 1e3                                # effectively bearing-only
-            ok, d2 = self.ekf.update([o['r'], o['b']], np.diag([sr ** 2, sb ** 2]), o['id'])
-            if ok:
+            result, d2 = self.ekf.update(o['id'], [o['r'], o['b']], np.diag([sr ** 2, sb ** 2]))
+            if result == 'new':                         # first sighting: added to the map
+                self.n_updates += 1
+                lx, ly, _ = self.ekf.landmarks()[o['id']]
+                self.get_logger().info(f"new landmark {o['id']} at ({lx:.2f}, {ly:.2f}), "
+                                       f"{self.ekf.n} in the map")
+            elif result == 'ok':
                 self.n_updates += 1
                 self.n_rejected_in_row = 0
             else:
                 self.n_rejected_in_row += 1
                 self.get_logger().warn(f"rejected {o['id']} (d2={d2:.1f})", throttle_duration_sec=1.0)
                 if self.n_rejected_in_row >= 10:        # we are probably lost: open up the uncertainty
-                    self.ekf.P += np.diag([0.15 ** 2, 0.15 ** 2, math.radians(15) ** 2])
+                    self.ekf.inflate_robot(0.15 ** 2, math.radians(15) ** 2)
                     self.n_rejected_in_row = 0
-                    self.get_logger().warn('10 rejections in a row -> inflating covariance')
+                    self.get_logger().warn('10 rejections in a row -> inflating robot covariance')
 
     # ----------------------------------------------------------------- outputs
     def publish_pose(self):
-        x, y, th = self.ekf.x
+        x, y, th = self.ekf.x[:3]
         P = self.ekf.P
         msg = PoseWithCovarianceStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -212,15 +212,26 @@ class Localizer(Node):
         msg.pose.covariance = cov
         self.pub.publish(msg)
 
+    def publish_map(self):
+        out = {lid: [round(float(lx), 4), round(float(ly), 4), float(C[0, 0]), float(C[0, 1]), float(C[1, 1])]
+               for lid, (lx, ly, C) in self.ekf.landmarks().items()}
+        self.map_pub.publish(String(data=json.dumps(out)))
+
     def on_log(self):
-        x, y, th = self.ekf.x
-        sd = np.sqrt(np.diag(self.ekf.P))
-        self.log.writerow([f'{time.monotonic() - self.t0:.2f}', f'{x:.4f}', f'{y:.4f}', f'{th:.4f}',
-                           f'{sd[0]:.4f}', f'{sd[1]:.4f}', f'{sd[2]:.4f}', self.n_updates])
+        t = f'{time.monotonic() - self.t0:.2f}'
+        x, y, th = self.ekf.x[:3]
+        sd = np.sqrt(np.diag(self.ekf.P)[:3])
+        self.log.writerow([t, f'{x:.4f}', f'{y:.4f}', f'{th:.4f}',
+                           f'{sd[0]:.4f}', f'{sd[1]:.4f}', f'{sd[2]:.4f}', self.n_updates, self.ekf.n])
         self.log_f.flush()
+        for lid, (lx, ly, C) in self.ekf.landmarks().items():
+            self.map_log.writerow([t, lid, f'{lx:.4f}', f'{ly:.4f}',
+                                   f'{C[0, 0]:.6f}', f'{C[0, 1]:.6f}', f'{C[1, 1]:.6f}'])
+        self.map_f.flush()
 
     def destroy_node(self):
         self.log_f.close()
+        self.map_f.close()
         super().destroy_node()
 
 

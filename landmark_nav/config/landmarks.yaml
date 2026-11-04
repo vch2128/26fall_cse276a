@@ -13,8 +13,11 @@
 # TODO: these positions are a starting suggestion for the path
 #   (0,0,0) -> (1,0,0) -> (1,2,pi) -> (0,0,0); measure the real values.
 landmarks:
-  cup:        {x: 0.5, y: 2.0, height: 0.115} #0.115
-  wine glass: {x: 1.4, y: 0.0, height: 0.215}
-  bowl:       {x: 1.0, y: 2.3, height: 0.085}
-  bottle:     {x: 1.4, y: 1.0, height: 0.115}
-  laptop:     {x: -0.4, y: -0.4, height: 0.227}   # seen at waypoint 3 (facing +x, theta = 0)ß
+  suitcase:    {height: 0.665}
+  cup:         {height: 0.115}
+  laptop:      {height: 0.227}
+  wine glass:  {height: 0.215}
+  stop sign:   {height: 0.190}
+  bowl:        {height: 0.085}
+  bottle:      {height: 0.115}
+  banana:      {height: 0.215}

@@ -63,7 +63,7 @@ ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_w
 
 ros2 run landmark_nav localizer --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks.yaml
 
-ros2 run landmark_nav closed_loop_control waypoints_hw2.txt
+ros2 run landmark_nav closed_loop_control square 1.2 2      # 1.2 m square, 2 laps
 
 
 # tests

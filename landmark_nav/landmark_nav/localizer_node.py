@@ -75,7 +75,7 @@ class Localizer(Node):
         self.min_sb = p('min_sigma_b', math.radians(1.0)).value
         self.max_still_age = p('max_still_obs_age', 3.0).value           # s; image taken while standing still
         self.still_margin = p('still_margin', 0.3).value                 # s after a motion before the robot is still
-        self.max_range = p('max_range', 3.0).value                       # m; farther detections are too noisy
+        self.max_range = p('max_range', 4.0).value                       # m; farther detections are too noisy
         log_file = os.path.expanduser(p('log_file', '~/ros2_ws/logs/trajectory.csv').value)
         map_log_file = os.path.expanduser(p('map_log_file', '~/ros2_ws/logs/map.csv').value)
 

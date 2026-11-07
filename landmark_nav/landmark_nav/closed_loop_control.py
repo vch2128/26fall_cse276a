@@ -45,8 +45,8 @@ SETTLE = 5                         # s standing still before reading the pose (d
 # ---- landmark search
 SEARCH_AT_WAYPOINTS = True         # search at the waypoint: before leaving it, and in face()
 SEARCH_AT_CHECKPOINTS = False      # search at the stop after each drive (incl. the arrival stop)
-SEARCH_STEP = math.radians(30)     # rad per search turn (CCW)
-SEARCH_MAX_STEPS = 12              # 12 x 30 deg = one full circle
+SEARCH_STEP = math.radians(45)     # rad per search turn (CCW)
+SEARCH_MAX_STEPS = 8              # 8 x 45 deg = one full circle
 SEARCH_SIGMA_XY = 0.05             # m: only search when the pose is at least this uncertain ...
 SEARCH_SIGMA_TH = math.radians(4)  # ... or the heading at least this uncertain
 # ---- active sensing with the SLAM map

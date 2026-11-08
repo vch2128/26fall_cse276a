@@ -5,8 +5,8 @@ Timed HW1 motions steered by the SLAM pose. Waypoints are relative to the start 
 (map origin, heading +x, left turns at corners).
 
 - scan_start: one full circle at the start to seed the map.
-- go_to: up to N_CHECKPOINTS + 1 drives per leg, re-aiming and re-reading the pose
-  before each; stops within NEAR.
+- go_to: drives each leg in STEP (10 cm) increments, stopping after each to observe
+  and re-aim at the waypoint; ends the leg within NEAR.
 - peek_known: after each leg, turn toward the closest mapped landmark that is near
   but out of view, to re-observe it.
 - face: heading correction, only for waypoint files with a heading.
@@ -32,16 +32,16 @@ from std_msgs.msg import Int32, String
 import robot_control.motion as mo
 from robot_control.motion import Motion, angle_diff
 
-# ---- checkpoints
-N_CHECKPOINTS = 2                  # stops (pose check + re-aim) between the start of a leg and the waypoint
-MIN_SEGMENT = 0.25                 # m: never split a leg into drives shorter than this
+# ---- steps
+STEP = 0.10                        # m: drive this far, stop, observe, re-aim (instructor: 5-10 cm)
+MAX_STEP_FACTOR = 3                # give up on a leg after MAX_STEP_FACTOR x (planned steps) drives
 # ---- tolerances / heading
 NEAR = 0.20                        # m: inside this, end the leg and accept the residual error
 ANG_TOL = math.radians(6)          # rad: close enough to the final heading
 HEADING_GAIN = 0.7                 # fraction of a small heading error corrected per try
 DAMP_BELOW = math.radians(30)      # heading errors larger than this are turned in full
 MAX_TRIES = 3                      # heading-correction attempts per waypoint
-SETTLE = 5                         # s standing still before reading the pose (detector needs a few frames)
+SETTLE = 3                         # s standing still before reading the pose (detector needs a few frames)
 # ---- landmark search
 SEARCH_AT_WAYPOINTS = True         # search at the waypoint: before leaving it, and in face()
 SEARCH_AT_CHECKPOINTS = False      # search at the stop after each drive (incl. the arrival stop)
@@ -147,18 +147,19 @@ def peek_known():
 
 # ------------------------------------------------------------------ motion helpers
 def go_to(gx, gy):
-    # leg with checkpoints: re-aim at the waypoint before each drive
+    """Drive to (gx, gy) in STEP increments: re-aim at the waypoint, drive, stop and observe."""
     x, y, th = observe(allow_search=SEARCH_AT_WAYPOINTS)        # at the previous waypoint (after the peek)
     dist = math.hypot(gx - x, gy - y)
-    n_drives = max(1, min(N_CHECKPOINTS + 1, math.ceil(dist / MIN_SEGMENT)))
-    for k in range(n_drives, 0, -1):               # k = drives left, including this one
+    max_steps = max(1, MAX_STEP_FACTOR * math.ceil(dist / STEP))
+    for i in range(max_steps):
         if dist < NEAR:
-            break
+            return
         motion.turn(angle_diff(math.atan2(gy - y, gx - x), th))   # skipped if < MIN_TURN_DEG
-        motion.drive(dist / k)
-        x, y, th = observe(allow_search=SEARCH_AT_CHECKPOINTS)   # checkpoint (or arrival) stop
+        motion.drive(min(STEP, dist))
+        x, y, th = observe(allow_search=SEARCH_AT_CHECKPOINTS)   # stop: EKF update from fresh frames
         dist = math.hypot(gx - x, gy - y)
-        print(f'  checkpoint: est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  {dist:.3f} m to go')
+        print(f'  step {i + 1}: est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  {dist:.3f} m to go')
+    print(f'  step limit ({max_steps}) reached, {dist:.3f} m from the waypoint -> next leg')
 
 
 def face(gth):

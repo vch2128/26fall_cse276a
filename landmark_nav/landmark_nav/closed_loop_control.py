@@ -50,9 +50,9 @@ SEARCH_MAX_STEPS = 8              # 8 x 45 deg = one full circle
 SEARCH_SIGMA_XY = 0.05             # m: only search when the pose is at least this uncertain ...
 SEARCH_SIGMA_TH = math.radians(4)  # ... or the heading at least this uncertain
 # ---- active sensing with the SLAM map
-SCAN_START = True                  # full circle at the start to seed the map
+SCAN_START = False                  # full circle at the start to seed the map
 SCAN_STEP = math.radians(45)       # rad per scan turn (keep below the camera's full FOV)
-PEEK = True                        # after each leg, look at a close mapped landmark that is out of view
+PEEK = False                        # after each leg, look at a close mapped landmark that is out of view
 HALF_FOV = math.radians(30)        # rad: half the camera's horizontal FOV = atan((W/2) / fx), minus a margin
 PEEK_RANGE = (0.4, 2.0)            # m: closer gets cut off at the image edge, farther is too noisy
 MAX_PEEKS = 1                      # peeks per corner

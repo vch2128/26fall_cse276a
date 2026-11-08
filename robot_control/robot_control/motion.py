@@ -20,9 +20,9 @@ import rclpy
 from std_msgs.msg import Float32MultiArray
 
 # ---- driving straight ----
-SECONDS_PER_METER = 3.2     # how many seconds of [0.25, 0.25] drive 1 meter
+SECONDS_PER_METER = 9     # how many seconds of [0.15, 0.15] drive 1 meter (4.25 1m, 0.6 0.1m)
 # SECONDS_PER_METER = 3.5
-DRIVE_CMD = 0.25
+DRIVE_CMD = 0.15
 
 # ---- wheel gains (multiply BASE_TURN for each wheel / direction) ----
 L_fwd = 0.93
@@ -38,11 +38,11 @@ BASE_TURN = 0.35             # command for the timed turn
 # CCW_TABLE = [(45, 0.68), (90, 1.08), (135, 1.48), (180, 1.88)]   # left turns
 # CW_TABLE = [(45, 0.7), (90, 1.04), (135, 1.38), (180, 1.95)]    # right turns
 
-# CCW_TABLE = [(45, 0.6), (90, 0.9), (135, 1.2), (180, 1.7)]   # left turns
-# CW_TABLE = [(45, 0.6), (90, 0.85), (135, 1.1), (180, 1.5)]    # right turns
+CCW_TABLE = [(45, 0.6), (90, 0.9), (135, 1.2), (180, 1.7)]   # left turns
+CW_TABLE = [(45, 0.6), (90, 0.85), (135, 1.2), (180, 1.55)]    # right turns
 
-CCW_TABLE = [(45, 0.6), (90, 1.1), (135, 1.4), (180, 1.9)]   # left turns
-CW_TABLE = [(45, 0.6), (90, 0.95), (135, 1.2), (180, 1.6)]    # right turns
+# CCW_TABLE = [(45, 0.6), (90, 1.1), (135, 1.4), (180, 1.9)]   # left turns
+# CW_TABLE = [(45, 0.6), (90, 0.95), (135, 1.2), (180, 1.6)]    # right turns
 
 # NOTE: CW 90 and 135 sit on opposite sides of a straight line by ~0.07 s; re-measure.
 

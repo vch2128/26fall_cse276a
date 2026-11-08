@@ -35,7 +35,7 @@ from landmark_nav.ekf import SlamEKF
 from robot_control import motion as cal        # the calibration the controllers use
 
 
-def table_angle(seconds, table):
+def table_inverse(seconds, table):
     """Degrees turned by a spin of `seconds`: the inverse of motion.table_time
     (same piecewise-linear table, first / last segment extended)."""
     pts = sorted((t, a) for a, t in table)
@@ -132,9 +132,9 @@ class Localizer(Node):
         kind, sign, start = self.seg
         elapsed = max(0.0, t - start)
         if kind == 'drive':
-            total = elapsed / cal.SECONDS_PER_METER                           # meters
+            total = table_inverse(elapsed, cal.DRIVE_TABLE)                            # meters
         else:
-            total = table_angle(elapsed, cal.CCW_TABLE if sign > 0 else cal.CW_TABLE)   # degrees
+            total = table_inverse(elapsed, cal.CCW_TABLE if sign > 0 else cal.CW_TABLE)   # degrees
         inc, self.seg_done = total - self.seg_done, total
         if kind == 'drive':
             self.pending[0] += sign * inc

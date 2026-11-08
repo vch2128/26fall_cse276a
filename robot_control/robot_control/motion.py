@@ -20,9 +20,11 @@ import rclpy
 from std_msgs.msg import Float32MultiArray
 
 # ---- driving straight ----
-SECONDS_PER_METER = 9     # how many seconds of [0.15, 0.15] drive 1 meter (4.25 1m, 0.6 0.1m)
-# SECONDS_PER_METER = 3.5
-DRIVE_CMD = 0.15
+DRIVE_CMD = 0.2           # wheel command for driving straight
+
+# Measured (meters, seconds) at DRIVE_CMD.
+# Between points: straight-line interpolation; outside: the line is extended.
+DRIVE_TABLE = [(0.1, 0.6), (1.0, 4.25)]
 
 # ---- wheel gains (multiply BASE_TURN for each wheel / direction) ----
 L_fwd = 0.93
@@ -125,7 +127,11 @@ class Motion:
         self.stop(STOP_SECONDS)
 
     def drive(self, meters):  # go straight
-        self.send(DRIVE_CMD, DRIVE_CMD, meters * SECONDS_PER_METER)
+        if meters <= 0.0:
+            return
+        seconds = table_time(meters, DRIVE_TABLE)
+        print(f'  drive {meters:.3f} m: {seconds:.3f} s')
+        self.send(DRIVE_CMD, DRIVE_CMD, seconds)
 
     def rotate(self, sign, seconds, speed=BASE_TURN):
         """Spin in place for `seconds` (ramped up at the start), then stop."""

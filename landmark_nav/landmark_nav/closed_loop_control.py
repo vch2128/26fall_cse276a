@@ -9,7 +9,8 @@ Timed HW1 motions steered by the SLAM pose. Waypoints are relative to the start 
   and re-aim at the waypoint; ends the leg within NEAR.
 - peek_known: after each leg, turn toward the closest mapped landmark that is near
   but out of view, to re-observe it.
-- face: heading correction, only for waypoint files with a heading.
+- face: heading correction, for waypoint files with a heading, and once at the end to
+  turn back to the start facing.
 - observe: before each pose read, stand still SETTLE s; if no landmark and the pose is
   uncertain, search with CCW turns (SEARCH_AT_WAYPOINTS / SEARCH_AT_CHECKPOINTS).
 
@@ -223,6 +224,7 @@ def main():
         motion.spin_for(0.1)
 
     t_start = time.monotonic()
+    start_th = pose[2]                             # start facing (map frame), restored at the end
     try:
         if SCAN_START:
             scan_start()
@@ -239,6 +241,11 @@ def main():
                 print(f'== lap {k // per_lap} done at t = {time.monotonic() - t_start:.0f} s: '
                       f'est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  '
                       f'sigma=({sx:.3f}, {sy:.3f}, {math.degrees(sth):.1f}deg)')
+        print(f'--> trajectory finished, turning back to the start facing ({math.degrees(start_th):+.1f}deg)')
+        face(start_th)
+        x, y, th = pose[:3]
+        print(f'== final est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg), '
+              f'heading error {math.degrees(angle_diff(start_th, th)):+.1f}deg')
     except KeyboardInterrupt:
         pass
     finally:

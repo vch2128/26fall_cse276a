@@ -54,12 +54,12 @@ class SlamEKF:
             i = self.idx(lid)
             out[lid] = (self.x[i], self.x[i + 1], self.P[i:i + 2, i:i + 2].copy())
         return out
-
+    '''
     def camera(self):
         """Camera position in the map frame."""
         xr, yr, th = self.x[:3]
         return xr + self.a * math.cos(th), yr + self.a * math.sin(th)
-
+    '''
     def inflate_robot(self, var_xy, var_th):
         """Add uncertainty to the robot pose only (used when the filter seems lost)."""
         self.P[0, 0] += var_xy

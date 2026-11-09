@@ -37,8 +37,9 @@ from robot_control.motion import Motion, angle_diff
 STEP = 0.10                        # m: drive this far, stop, observe, re-aim (instructor: 5-10 cm)
 MAX_STEP_FACTOR = 3                # give up on a leg after MAX_STEP_FACTOR x (planned steps) drives
 # ---- tolerances / heading
-NEAR = 0.20                        # m: inside this, end the leg and accept the residual error
+NEAR = 0.10                        # m: inside this, end the leg and accept the residual error
 ANG_TOL = math.radians(6)          # rad: close enough to the final heading
+AIM_TOL = math.radians(10)          # rad: in go_to, skip the re-aim before a step if the error is below this
 HEADING_GAIN = 0.7                 # fraction of a small heading error corrected per try
 DAMP_BELOW = math.radians(30)      # heading errors larger than this are turned in full
 MAX_TRIES = 3                      # heading-correction attempts per waypoint
@@ -51,17 +52,16 @@ SEARCH_MAX_STEPS = 8              # 8 x 45 deg = one full circle
 SEARCH_SIGMA_XY = 0.05             # m: only search when the pose is at least this uncertain ...
 SEARCH_SIGMA_TH = math.radians(4)  # ... or the heading at least this uncertain
 # ---- active sensing with the SLAM map
-SCAN_START = False                  # full circle at the start to seed the map
-SCAN_STEP = math.radians(45)       # rad per scan turn (keep below the camera's full FOV)
-PEEK = False                        # after each leg, look at a close mapped landmark that is out of view
-HALF_FOV = math.radians(30)        # rad: half the camera's horizontal FOV = atan((W/2) / fx), minus a margin
-PEEK_RANGE = (0.4, 2.0)            # m: closer gets cut off at the image edge, farther is too noisy
-MAX_PEEKS = 1                      # peeks per corner
+# SCAN_START = False                  # full circle at the start to seed the map
+# SCAN_STEP = math.radians(45)       # rad per scan turn (keep below the camera's full FOV)
+# PEEK = False                        # after each leg, look at a close mapped landmark that is out of view
+# HALF_FOV = math.radians(30)        # rad: half the camera's horizontal FOV = atan((W/2) / fx), minus a margin
+# PEEK_RANGE = (0.4, 2.0)            # m: closer gets cut off at the image edge, farther is too noisy
+# MAX_PEEKS = 1                      # peeks per corner
 
 motion = None                      # Motion bound to this node (set in main)
 pose = None                        # latest (x, y, theta, sigma_x, sigma_y, sigma_theta)
 n_updates = None                   # landmark updates accepted by the localizer so far
-landmap = {}                       # current SLAM map: id -> (x, y), from landmark_map
 
 
 def on_pose(msg):
@@ -69,18 +69,19 @@ def on_pose(msg):
     q = msg.pose.pose.orientation
     c = msg.pose.covariance
     pose = (msg.pose.pose.position.x, msg.pose.pose.position.y, 2.0 * math.atan2(q.z, q.w),
-            math.sqrt(c[0]), math.sqrt(c[7]), math.sqrt(c[35]))
+            math.sqrt(max(0.0, c[0])), math.sqrt(max(0.0, c[7])),   # clamp: rounding can make a
+            math.sqrt(max(0.0, c[35])))
 
 
 def on_updates(msg):
     global n_updates
     n_updates = msg.data
 
-
+'''
 def on_map(msg):
     global landmap
     landmap = {lid: (v[0], v[1]) for lid, v in json.loads(msg.data).items()}
-
+'''
 
 # ------------------------------------------------------------------ sensing
 def wait_for_landmark(seconds):
@@ -116,34 +117,34 @@ def observe(allow_search):
     return pose[:3]
 
 
-def scan_start():
-    """Full circle in place at the start (P ~ 0): landmarks added here are the best-placed anchors."""
-    steps = round(2 * math.pi / SCAN_STEP)
-    print(f'start scan: {steps} x {math.degrees(SCAN_STEP):.0f} deg')
-    wait_for_landmark(SETTLE)                      # what is in view before the first turn
-    for i in range(steps):
-        motion.turn(SCAN_STEP)
-        wait_for_landmark(SETTLE)
-        print(f'  scan {i + 1}/{steps}: {len(landmap)} landmark(s) in the map')
+# def scan_start():
+#     """Full circle in place at the start (P ~ 0): landmarks added here are the best-placed anchors."""
+#     steps = round(2 * math.pi / SCAN_STEP)
+#     print(f'start scan: {steps} x {math.degrees(SCAN_STEP):.0f} deg')
+#     wait_for_landmark(SETTLE)                      # what is in view before the first turn
+#     for i in range(steps):
+#         motion.turn(SCAN_STEP)
+#         wait_for_landmark(SETTLE)
+#         print(f'  scan {i + 1}/{steps}: {len(landmap)} landmark(s) in the map')
 
 
-def peek_known():
-    """Turn toward the closest mapped landmark that is near but out of view, and re-observe it."""
-    for _ in range(MAX_PEEKS):
-        x, y, th = pose[:3]
-        cands = []
-        for lid, (lx, ly) in landmap.items():
-            r = math.hypot(lx - x, ly - y)
-            b = angle_diff(math.atan2(ly - y, lx - x), th)    # bearing relative to the robot, + = left
-            if PEEK_RANGE[0] < r < PEEK_RANGE[1] and abs(b) > HALF_FOV:
-                cands.append((r, b, lid))
-        if not cands:
-            return
-        r, b, lid = min(cands)                     # closest first: best range, most reliable detection
-        print(f'  peek at {lid} ({r:.2f} m, {math.degrees(b):+.0f} deg)')
-        motion.turn(b)
-        seen = wait_for_landmark(SETTLE)
-        print(f'  peek at {lid}: {"seen" if seen else "nothing accepted"}')
+# def peek_known():
+#     """Turn toward the closest mapped landmark that is near but out of view, and re-observe it."""
+#     for _ in range(MAX_PEEKS):
+#         x, y, th = pose[:3]
+#         cands = []
+#         for lid, (lx, ly) in landmap.items():
+#             r = math.hypot(lx - x, ly - y)
+#             b = angle_diff(math.atan2(ly - y, lx - x), th)    # bearing relative to the robot, + = left
+#             if PEEK_RANGE[0] < r < PEEK_RANGE[1] and abs(b) > HALF_FOV:
+#                 cands.append((r, b, lid))
+#         if not cands:
+#             return
+#         r, b, lid = min(cands)                     # closest first: best range, most reliable detection
+#         print(f'  peek at {lid} ({r:.2f} m, {math.degrees(b):+.0f} deg)')
+#         motion.turn(b)
+#         seen = wait_for_landmark(SETTLE)
+#         print(f'  peek at {lid}: {"seen" if seen else "nothing accepted"}')
 
 
 # ------------------------------------------------------------------ motion helpers
@@ -155,7 +156,9 @@ def go_to(gx, gy):
     for i in range(max_steps):
         if dist < NEAR:
             return
-        motion.turn(angle_diff(math.atan2(gy - y, gx - x), th))   # skipped if < MIN_TURN_DEG
+        aim = angle_diff(math.atan2(gy - y, gx - x), th)
+        if abs(aim) > AIM_TOL:                     # small errors: keep the heading, re-aim at the next stop
+            motion.turn(aim)
         motion.drive(min(STEP, dist))
         x, y, th = observe(allow_search=SEARCH_AT_CHECKPOINTS)   # stop: EKF update from fresh frames
         dist = math.hypot(gx - x, gy - y)
@@ -210,7 +213,7 @@ def main():
     motion = Motion(node)
     node.create_subscription(PoseWithCovarianceStamped, 'robot_pose', on_pose, 10)
     node.create_subscription(Int32, 'landmark_updates', on_updates, 10)
-    node.create_subscription(String, 'landmark_map', on_map, 10)
+    #node.create_subscription(String, 'landmark_map', on_map, 10)
 
     args = sys.argv[1:]
     if args and args[0] in ('square', 'octagon'):
@@ -226,13 +229,13 @@ def main():
     t_start = time.monotonic()
     start_th = pose[2]                             # start facing (map frame), restored at the end
     try:
-        if SCAN_START:
-            scan_start()
+        # if SCAN_START:
+        #     scan_start()
         for k, (gx, gy, gth) in enumerate(waypoints, 1):
             print(f'--> waypoint {k}/{len(waypoints)} ({gx}, {gy})')
             go_to(gx, gy)
-            if PEEK:
-                peek_known()
+            # if PEEK:
+            #     peek_known()
             if gth is not None:
                 face(gth)
             if k % per_lap == 0:                   # end of a lap (back at the start corner)

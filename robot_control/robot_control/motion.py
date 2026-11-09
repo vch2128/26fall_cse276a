@@ -40,8 +40,8 @@ BASE_TURN = 0.35             # command for the timed turn
 # CCW_TABLE = [(45, 0.68), (90, 1.08), (135, 1.48), (180, 1.88)]   # left turns
 # CW_TABLE = [(45, 0.7), (90, 1.04), (135, 1.38), (180, 1.95)]    # right turns
 
-CCW_TABLE = [(45, 0.6), (90, 0.9), (135, 1.2), (180, 1.7)]   # left turns
-CW_TABLE = [(45, 0.6), (90, 0.85), (135, 1.2), (180, 1.55)]    # right turns
+CCW_TABLE = [(45, 0.7), (90, 1.2), (135, 1.7), (180, 2.1)]   # left turns
+CW_TABLE = [(45, 0.6), (90, 0.9), (135, 1.2), (180, 1.55)]    # right turns
 
 # CCW_TABLE = [(45, 0.6), (90, 1.1), (135, 1.4), (180, 1.9)]   # left turns
 # CW_TABLE = [(45, 0.6), (90, 0.95), (135, 1.2), (180, 1.6)]    # right turns

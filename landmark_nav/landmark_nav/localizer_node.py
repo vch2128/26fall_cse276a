@@ -76,6 +76,13 @@ class Localizer(Node):
         self.max_still_age = p('max_still_obs_age', 3.0).value           # s; image taken while standing still
         self.still_margin = p('still_margin', 0.3).value                 # s after a motion before the robot is still
         self.max_range = p('max_range', 4.0).value                       # m; farther detections are too noisy
+        # Frames of one stop see the same still scene, so their errors are NOT independent: feeding
+        # every frame as its own update makes the filter overconfident. Instead, average the first
+        # fuse_frames frames of each tag and apply ONE update per tag per stop (0 = every frame).
+        self.fuse_frames = p('fuse_frames', 3).value
+        # The per-stop error (calibration, tag pose) is larger than the frame-to-frame jitter the
+        # detector's sigmas describe: scale them up (1.0 = detector sigmas as they are).
+        self.meas_scale = p('meas_scale', 3.0).value
         log_file = os.path.expanduser(p('log_file', '~/ros2_ws/logs/trajectory.csv').value)
         map_log_file = os.path.expanduser(p('map_log_file', '~/ros2_ws/logs/map.csv').value)
 
@@ -89,6 +96,8 @@ class Localizer(Node):
         self.last_motion = 0.0       # ROS time (s) the robot was last moving
         self.n_updates = 0           # landmark observations used (new + accepted)
         self.n_rejected_in_row = 0
+        self.stop_buf = {}           # tag id -> [(r, b, sr, sb)] frames collected in this stop
+        self.stop_done = set()       # tags already used in this stop
 
         self.create_subscription(Float32MultiArray, 'motor_commands', self.on_cmd, 10)
         self.create_subscription(String, 'landmark_obs', self.on_obs, 10)
@@ -122,6 +131,7 @@ class Localizer(Node):
                 self.advance(t)
                 self.seg = None
             if new:                                   # a new motion starts now
+                self.flush_stop()                     # use tags seen in fewer than fuse_frames frames
                 self.seg, self.seg_done = (new[0], new[1], t), 0.0
         self.cmd_time = t
 
@@ -173,24 +183,49 @@ class Localizer(Node):
         for o in data['obs']:
             if o['r'] > self.max_range:                 # too far: range too noisy (could misplace a new landmark)
                 continue
-            sr = max(o['sr'], self.min_sr)
-            sb = max(o['sb'], self.min_sb)
-            result, d2 = self.ekf.update(o['id'], [o['r'], o['b']], np.diag([sr ** 2, sb ** 2]))
-            if result == 'new':                         # first sighting: added to the map
-                self.n_updates += 1
-                lx, ly, _ = self.ekf.landmarks()[o['id']]
-                self.get_logger().info(f"new landmark {o['id']} at ({lx:.2f}, {ly:.2f}), "
-                                       f"{self.ekf.n} in the map")
-            elif result == 'ok':
-                self.n_updates += 1
+            sr = max(o['sr'], self.min_sr) * self.meas_scale
+            sb = max(o['sb'], self.min_sb) * self.meas_scale
+            if self.fuse_frames <= 0:
+                self.apply(o['id'], o['r'], o['b'], sr, sb)
+                continue
+            if o['id'] in self.stop_done:               # already used in this stop
+                continue
+            self.stop_buf.setdefault(o['id'], []).append((o['r'], o['b'], sr, sb))
+            if len(self.stop_buf[o['id']]) >= self.fuse_frames:
+                self.fuse(o['id'])
+
+    def fuse(self, lid):
+        """One EKF update for tag lid from the mean of its buffered frames."""
+        fr = self.stop_buf.pop(lid)
+        self.stop_done.add(lid)
+        r = float(np.mean([f[0] for f in fr]))
+        b = math.atan2(np.mean([math.sin(f[1]) for f in fr]), np.mean([math.cos(f[1]) for f in fr]))
+        self.apply(lid, r, b, float(np.mean([f[2] for f in fr])), float(np.mean([f[3] for f in fr])))
+
+    def flush_stop(self):
+        """The robot starts moving: use what is left of this stop, then start a new one."""
+        for lid in list(self.stop_buf):
+            self.fuse(lid)
+        self.stop_buf, self.stop_done = {}, set()
+
+    def apply(self, lid, r, b, sr, sb):
+        """Feed one observation to the EKF (new landmark or gated update) and keep the counters."""
+        result, d2 = self.ekf.update(lid, [r, b], np.diag([sr ** 2, sb ** 2]))
+        if result == 'new':                         # first sighting: added to the map
+            self.n_updates += 1
+            lx, ly, _ = self.ekf.landmarks()[lid]
+            self.get_logger().info(f"new landmark {lid} at ({lx:.2f}, {ly:.2f}), "
+                                   f"{self.ekf.n} in the map")
+        elif result == 'ok':
+            self.n_updates += 1
+            self.n_rejected_in_row = 0
+        else:
+            self.n_rejected_in_row += 1
+            self.get_logger().warn(f"rejected {lid} (d2={d2:.1f})", throttle_duration_sec=1.0)
+            if self.n_rejected_in_row >= 10:        # we are probably lost: open up the uncertainty
+                self.ekf.inflate_robot(0.15 ** 2, math.radians(15) ** 2)
                 self.n_rejected_in_row = 0
-            else:
-                self.n_rejected_in_row += 1
-                self.get_logger().warn(f"rejected {o['id']} (d2={d2:.1f})", throttle_duration_sec=1.0)
-                if self.n_rejected_in_row >= 10:        # we are probably lost: open up the uncertainty
-                    self.ekf.inflate_robot(0.15 ** 2, math.radians(15) ** 2)
-                    self.n_rejected_in_row = 0
-                    self.get_logger().warn('10 rejections in a row -> inflating robot covariance')
+                self.get_logger().warn('10 rejections in a row -> inflating robot covariance')
 
     # ----------------------------------------------------------------- outputs
     def publish_pose(self):

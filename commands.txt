@@ -15,7 +15,7 @@ ros2 run robot_control calibrate --ros-args -p L:=-0.4 -p R:=0.4 -p duration:=3.
 
 ros2 run robot_control calibrate --ros-args -p log_file:=~/ros2_ws/logs/spin_tests.csv
 
-ros2 run robot_control calibrate --ros-args -p L:=0.15 -p R:=0.15 -p duration:=3.0
+ros2 run robot_control calibrate --ros-args -p L:=0.2 -p R:=0.2 -p duration:=3.0
 
 for c in 0.35; do for d in ccw; do for n in 1; do
   if [ $d = ccw ]; then L=-$c; R=$c; else L=$c; R=-$c; fi

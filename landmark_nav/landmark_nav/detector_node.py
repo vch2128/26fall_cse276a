@@ -44,7 +44,7 @@ class LandmarkDetector(Node):
     def __init__(self):
         super().__init__('landmark_detector')
         p = self.declare_parameter
-        self.tag_size = p('tag_size', 0.169).value                # m, black square side
+        self.tag_size = p('tag_size', 0.165).value                # m, black square side
         self.backend = p('backend', 'opencv').value              # 'opencv' (default) or 'pupil'
         self.min_margin = p('min_decision_margin', 25.0).value   # pupil only: weaker detections are often false
         self.border = p('border_px', 5).value                    # drop tags this close to the image edge

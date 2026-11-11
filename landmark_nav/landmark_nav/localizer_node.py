@@ -13,6 +13,8 @@ Publishes:
 Writes (every 0.5 s):
     log_file     CSV: t, x, y, theta, sx, sy, stheta, n_updates, n_landmarks
     map_log_file CSV: t, id, x, y, sxx, sxy, syy   (one row per landmark: the map at any time)
+    Both files also get a comment line "# lap N done, t = ..." when the controller finishes a lap
+    (lap_events topic). Read them with pandas.read_csv(f, comment='#') or np.loadtxt (skips '#').
 
 Run:
     ros2 run landmark_nav localizer
@@ -101,6 +103,7 @@ class Localizer(Node):
 
         self.create_subscription(Float32MultiArray, 'motor_commands', self.on_cmd, 10)
         self.create_subscription(String, 'landmark_obs', self.on_obs, 10)
+        self.create_subscription(String, 'lap_events', self.on_lap, 10)
         self.pub = self.create_publisher(PoseWithCovarianceStamped, 'robot_pose', 10)
         self.upd_pub = self.create_publisher(Int32, 'landmark_updates', 10)
         self.create_timer(0.05, self.on_timer)        # predict + publish, 20 Hz
@@ -263,6 +266,15 @@ class Localizer(Node):
             self.map_log.writerow([t, lid, f'{lx:.4f}', f'{ly:.4f}',
                                    f'{C[0, 0]:.6f}', f'{C[0, 1]:.6f}', f'{C[1, 1]:.6f}'])
         self.map_f.flush()
+
+    def on_lap(self, msg):
+        """Controller finished a lap: log the pose / map right now, then a marker line in both CSVs."""
+        self.on_log()
+        line = f'# {msg.data}, t = {time.monotonic() - self.t0:.2f}\n'
+        for f in (self.log_f, self.map_f):
+            f.write(line)
+            f.flush()
+        self.get_logger().info(f'{msg.data} (marked in the CSV logs)')
 
     def destroy_node(self):
         self.log_f.close()

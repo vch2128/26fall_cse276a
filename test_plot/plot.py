@@ -28,7 +28,7 @@ import numpy as np                                     # noqa: E402
 from matplotlib.patches import Ellipse                 # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOGS = os.path.expanduser('~/ros2_ws/logs')
+LOGS = os.path.expanduser('~/ros2_ws/src/26fall_cse276a/traj_log')
 CHI2_95 = 5.991                                         # 95% region for 2 DOF
 
 

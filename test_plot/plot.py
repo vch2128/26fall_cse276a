@@ -32,13 +32,19 @@ LOGS = os.path.expanduser('~/ros2_ws/src/26fall_cse276a/traj_log')
 CHI2_95 = 5.991                                         # 95% region for 2 DOF
 
 
+def rows(path):
+    """CSV rows, skipping comment lines such as '# lap 1 done, t = 182.02'."""
+    with open(path) as f:
+        return list(csv.DictReader(line for line in f if not line.lstrip().startswith('#')))
+
+
 def load(map_csv, traj_csv):
     snaps = defaultdict(dict)                           # t -> {id: (x, y, 2x2 cov)}
-    for r in csv.DictReader(open(map_csv)):
+    for r in rows(map_csv):
         C = np.array([[float(r['sxx']), float(r['sxy'])], [float(r['sxy']), float(r['syy'])]])
         snaps[float(r['t'])][r['id']] = (float(r['x']), float(r['y']), C)
     traj = np.array([[float(r['t']), float(r['x']), float(r['y']), float(r['theta'])]
-                     for r in csv.DictReader(open(traj_csv))])
+                     for r in rows(traj_csv)])
     return snaps, traj
 
 

@@ -213,6 +213,7 @@ def main():
     motion = Motion(node)
     node.create_subscription(PoseWithCovarianceStamped, 'robot_pose', on_pose, 10)
     node.create_subscription(Int32, 'landmark_updates', on_updates, 10)
+    lap_pub = node.create_publisher(String, 'lap_events', 10)   # localizer marks laps in its CSVs
     #node.create_subscription(String, 'landmark_map', on_map, 10)
 
     args = sys.argv[1:]
@@ -244,6 +245,8 @@ def main():
                 print(f'== lap {k // per_lap} done at t = {time.monotonic() - t_start:.0f} s: '
                       f'est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  '
                       f'sigma=({sx:.3f}, {sy:.3f}, {math.degrees(sth):.1f}deg)')
+                lap_pub.publish(String(data=f'lap {k // per_lap} done'))
+                motion.spin_for(0.1)               # let the message go out
         print(f'--> trajectory finished, turning back to the start facing ({math.degrees(start_th):+.1f}deg)')
         face(start_th)
         x, y, th = pose[:3]

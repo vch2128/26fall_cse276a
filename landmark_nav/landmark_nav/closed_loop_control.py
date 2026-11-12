@@ -62,6 +62,10 @@ SEARCH_SIGMA_TH = math.radians(4)  # ... or the heading at least this uncertain
 motion = None                      # Motion bound to this node (set in main)
 pose = None                        # latest (x, y, theta, sigma_x, sigma_y, sigma_theta)
 n_updates = None                   # landmark updates accepted by the localizer so far
+fresh_fix = False                  # a landmark update was accepted since the robot last moved.
+                                   # The localizer uses each tag only ONCE per stop (stop_done), so a
+                                   # second observe() at the same stop sees no new update even though
+                                   # the tag is in view; this flag stops that from triggering a search.
 
 
 def on_pose(msg):
@@ -83,12 +87,30 @@ def on_map(msg):
     landmap = {lid: (v[0], v[1]) for lid, v in json.loads(msg.data).items()}
 '''
 
+# ------------------------------------------------------------------ motion wrappers
+def turn(angle):
+    """motion.turn that also marks the pose as not yet corrected at the new stop."""
+    global fresh_fix
+    fresh_fix = False
+    motion.turn(angle)
+
+
+def drive(dist):
+    """motion.drive that also marks the pose as not yet corrected at the new stop."""
+    global fresh_fix
+    fresh_fix = False
+    motion.drive(dist)
+
+
 # ------------------------------------------------------------------ sensing
 def wait_for_landmark(seconds):
     """Stand still for `seconds` (ROS keeps spinning); True if a landmark update came in."""
+    global fresh_fix
     n0 = n_updates
     motion.stop(seconds)
-    return n_updates is not None and n0 is not None and n_updates > n0
+    got = n_updates is not None and n0 is not None and n_updates > n0
+    fresh_fix = fresh_fix or got
+    return got
 
 
 def uncertain():
@@ -100,7 +122,7 @@ def search():
     """Small turns in place until the localizer accepts a landmark (at most one full circle)."""
     for i in range(SEARCH_MAX_STEPS):
         print(f'  no landmark in view -> search turn {i + 1}/{SEARCH_MAX_STEPS}')
-        motion.turn(SEARCH_STEP)
+        turn(SEARCH_STEP)
         if wait_for_landmark(SETTLE):
             print('  landmark found, pose corrected')
             return True
@@ -110,6 +132,8 @@ def search():
 
 def observe(allow_search):
     """Stop, let the localizer correct the pose (searching if needed and allowed), return (x, y, theta)."""
+    if fresh_fix:                  # already corrected at this stop: the localizer won't reuse the same tag
+        return pose[:3]
     seen = wait_for_landmark(SETTLE)
     if allow_search and not seen and n_updates is not None and uncertain():
         print('no landmark in view and pose is uncertain, searching ...')
@@ -158,8 +182,8 @@ def go_to(gx, gy):
             return
         aim = angle_diff(math.atan2(gy - y, gx - x), th)
         if abs(aim) > AIM_TOL:                     # small errors: keep the heading, re-aim at the next stop
-            motion.turn(aim)
-        motion.drive(min(STEP, dist))
+            turn(aim)
+        drive(min(STEP, dist))
         x, y, th = observe(allow_search=SEARCH_AT_CHECKPOINTS)   # stop: EKF update from fresh frames
         dist = math.hypot(gx - x, gy - y)
         print(f'  step {i + 1}: est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)  {dist:.3f} m to go')
@@ -172,7 +196,7 @@ def face(gth):
         err = angle_diff(gth, th)
         if abs(err) < ANG_TOL:
             return
-        motion.turn(HEADING_GAIN * err if abs(err) < DAMP_BELOW else err)
+        turn(HEADING_GAIN * err if abs(err) < DAMP_BELOW else err)
 
 
 # ------------------------------------------------------------------ main

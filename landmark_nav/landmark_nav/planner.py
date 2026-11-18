@@ -18,15 +18,14 @@ they differ in the world representation:
                finds the shortest route along the diagram. The path is then simplified (nearly
                collinear points removed) without losing clearance, so the robot turns less.
 
-Outputs (next to the map file unless --out is given):
-    path_short.txt, path_safe.txt   waypoint files "x, y, theta" for closed_loop_control
-                                    (first line = start pose; theta = heading of the next leg)
-    path_compare.png                both representations and paths, for the report
+hw4_control.py calls plan_visibility / plan_voronoi at start-up. Run this file on its own to
+print the comparison table and save path_compare.png (both representations and paths, for the
+report) next to the map file unless --out is given.
 
 No ROS imports: runs on a laptop.
     pip install numpy scipy matplotlib pyyaml
     python3 landmark_nav/landmark_nav/planner.py                    # uses ../config/map_hw4.yaml
-    python3 landmark_nav/landmark_nav/planner.py --map my_map.yaml --frame world
+    python3 landmark_nav/landmark_nav/planner.py --map my_map.yaml --out figures/
 """
 import argparse
 import heapq
@@ -124,7 +123,6 @@ class World:
         pl = cfg.get('planner') or {}
         self.sample = float(pl.get('voronoi_sample', 0.03))
         self.simplify_tol = float(pl.get('simplify_tol', 0.04))
-        self.frame = pl.get('output_frame', 'start')
         for name, p in (('start', self.start), ('goal', self.goal)):
             if self.clearance(p) < self.R:
                 raise ValueError(f'{name} {p} is closer than {self.R:.2f} m to a wall or an obstacle')
@@ -318,37 +316,6 @@ def metrics(world, path):
             'waypoints': len(path) - 1, 'turning_deg': math.degrees(turning)}
 
 
-def headings(path):
-    """theta of each point = direction of the leg that leaves it (last point: the last leg)."""
-    th = [math.atan2(b[1] - a[1], b[0] - a[0]) for a, b in zip(path, path[1:])]
-    return th + [th[-1]]
-
-
-def to_frame(world, x, y, th):
-    """World frame -> the robot's start frame (origin = start, +x = start facing)."""
-    if world.frame == 'world':
-        return x, y, th
-    dx, dy = x - world.start[0], y - world.start[1]
-    c, s = math.cos(world.start_th), math.sin(world.start_th)
-    t = th - world.start_th
-    return (c * dx + s * dy + 0.0, -s * dx + c * dy + 0.0,          # + 0.0: no '-0.0000' in the file
-            math.atan2(math.sin(t), math.cos(t)) + 0.0)
-
-
-def write_waypoints(world, path, filename, label, m):
-    with open(filename, 'w') as f:
-        f.write(f'# HW4 {label} path from planner.py, frame = {world.frame}\n')
-        f.write(f'# length {m["length"]:.3f} m, min clearance {m["clearance"]:.3f} m '
-                f'(robot body gap {m["gap"]:.3f} m), obstacle clearance {m["obstacle"]:.3f} m, '
-                f'{m["waypoints"]} legs\n')
-        f.write('# x, y, theta   (first line = start pose)\n')
-        x, y, th = (round(v, 4) + 0.0 for v in to_frame(world, world.start[0], world.start[1], world.start_th))
-        f.write(f'{x:.4f}, {y:.4f}, {th:.4f}\n')
-        for p, h in zip(path[1:], headings(path)[1:]):
-            x, y, th = (round(v, 4) + 0.0 for v in to_frame(world, p[0], p[1], h))
-            f.write(f'{x:.4f}, {y:.4f}, {th:.4f}\n')
-
-
 def draw_world(ax, world, title):
     from matplotlib.patches import Polygon, Rectangle
     ax.add_patch(Rectangle((0, 0), world.W, world.H, fill=False, lw=2, color='black'))
@@ -429,18 +396,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--map', default=default_map(), help='map yaml (default: config/map_hw4.yaml)')
     ap.add_argument('--out', default=None, help='output folder (default: the map file folder)')
-    ap.add_argument('--frame', choices=['start', 'world'], default=None, help='override planner.output_frame')
     ap.add_argument('--no-plot', action='store_true')
     args = ap.parse_args()
 
     with open(args.map) as f:
         world = World(yaml.safe_load(f))
-    if args.frame:
-        world.frame = args.frame
     out = args.out or os.path.dirname(os.path.abspath(args.map))
     os.makedirs(out, exist_ok=True)
     print(f'map {args.map}: {world.W:.2f} x {world.H:.2f} m, {len(world.obstacles)} obstacle(s), '
-          f'inflation {world.R:.2f} m, output frame = {world.frame}')
+          f'inflation {world.R:.2f} m')
 
     vis = plan_visibility(world)
     vor = plan_voronoi(world)
@@ -454,13 +418,8 @@ def main():
     for label, key, fmt in rows:
         print(f'{label:24s}{format(m_vis[key], fmt):>12s}{format(m_vor[key], fmt):>12s}')
 
-    for res, m, label, name in ((vis, m_vis, 'shortest (visibility graph)', 'path_short.txt'),
-                                (vor, m_vor, 'safest (Voronoi)', 'path_safe.txt')):
-        fn = os.path.join(out, name)
-        write_waypoints(world, res['path'], fn, label, m)
-        print(f'\nwrote {fn}')
-        for p in res['path']:
-            print(f'  ({p[0]:.3f}, {p[1]:.3f})  world frame')
+    for res, label in ((vis, 'shortest (visibility graph)'), (vor, 'safest (Voronoi)')):
+        print(f'\n{label}: ' + ' -> '.join(f'({p[0]:.2f}, {p[1]:.2f})' for p in res['path']))
     if not args.no_plot:
         fn = os.path.join(out, 'path_compare.png')
         plot(world, vis, vor, m_vis, m_vor, fn)

@@ -18,6 +18,16 @@ Writes (every 0.5 s):
 
 Run:
     ros2 run landmark_nav localizer
+
+HW4 additions (both OFF by default, so the HW3 behaviour above is unchanged):
+    map_file      map yaml with `start` and `landmarks` (config/map_hw4.yaml): the EKF starts at the
+                  measured start pose in that WORLD frame and the tags are put in the state with a
+                  small covariance (landmark_sigma), so it LOCALIZES in the known map instead of
+                  building one. Tags that are not in the map are ignored.
+    accept_moving also use frames taken while the robot DRIVES straight (hw4_control never stands still
+                  for long): the tag is shifted by the distance driven since the photo, then
+                  applied at once. Frames taken while turning in place are not used.
+    ros2 run landmark_nav localizer --ros-args -p map_file:=<map_hw4.yaml> -p accept_moving:=true
 """
 import csv
 import json
@@ -27,6 +37,7 @@ import time
 
 import numpy as np
 import rclpy
+import yaml
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, Int32, String
@@ -91,6 +102,16 @@ class Localizer(Node):
         # Unknown start pose: the start pose IS the map origin, so x0 = 0 and P0 ~ 0; empty map.
         self.ekf = SlamEKF(self.cam_offset)
 
+        # ---- HW4: known map + observations while moving (see the docstring)
+        map_file = os.path.expanduser(p('map_file', '').value)
+        self.accept_moving = p('accept_moving', False).value
+        self.max_moving_age = p('max_moving_age', 0.4).value            # s; older frames are skipped
+        self.known_map = bool(map_file)
+        self.seg_start_stamp = 0.0                                       # ROS time the current motion began
+        if self.known_map:
+            self.load_map(map_file, p('start_sigma_xy', 0.03).value,
+                          math.radians(p('start_sigma_th_deg', 3.0).value), p('landmark_sigma', 0.02).value)
+
         self.cmd_time = 0.0
         self.seg = None              # current motion: (kind, sign, start time) or None
         self.seg_done = 0.0          # meters / degrees of the current motion already predicted
@@ -122,6 +143,36 @@ class Localizer(Node):
         self.t0 = time.monotonic()
         self.get_logger().info('SLAM started: map origin = start pose, empty map')
 
+    def load_map(self, map_file, s_xy, s_th, s_lm):
+        """HW4: start pose and tag positions from the map (world frame); no landmark is ever added."""
+        with open(map_file) as f:
+            m = yaml.safe_load(f)
+        st = m['start']
+        self.ekf.x[:3] = [float(st['x']), float(st['y']), math.radians(float(st.get('theta_deg', 0.0)))]
+        self.ekf.P[:3, :3] = np.diag([s_xy ** 2, s_xy ** 2, s_th ** 2])
+        for lid, v in (m.get('landmarks') or {}).items():
+            n = len(self.ekf.x)
+            P = np.zeros((n + 2, n + 2))
+            P[:n, :n] = self.ekf.P
+            P[n, n] = P[n + 1, n + 1] = s_lm ** 2
+            self.ekf.x = np.concatenate([self.ekf.x, [float(v['x']), float(v['y'])]])
+            self.ekf.P = P
+            self.ekf.ids.append(str(lid))
+        self.get_logger().info(f'known map {map_file}: start {np.round(self.ekf.x[:3], 3).tolist()}, '
+                               f'tags {self.ekf.ids}')
+
+    def current_speed(self):
+        """(m/s, rad/s) of the motion in progress, from the same tables as the odometry."""
+        if self.seg is None:
+            return 0.0, 0.0
+        kind, sign, _ = self.seg
+        if kind == 'drive':
+            (d0, t0), (d1, t1) = sorted(cal.DRIVE_TABLE)[0], sorted(cal.DRIVE_TABLE)[-1]
+            return (d1 - d0) / (t1 - t0), 0.0
+        (a0, t0), (a1, t1) = sorted(cal.CCW_TABLE if sign > 0 else cal.CW_TABLE)[0], \
+            sorted(cal.CCW_TABLE if sign > 0 else cal.CW_TABLE)[-1]
+        return 0.0, math.radians((a1 - a0) / (t1 - t0))
+
     # ------------------------------------------------------------------ inputs
     def on_cmd(self, msg):
         if len(msg.data) < 2:
@@ -136,6 +187,7 @@ class Localizer(Node):
             if new:                                   # a new motion starts now
                 self.flush_stop()                     # use tags seen in fewer than fuse_frames frames
                 self.seg, self.seg_done = (new[0], new[1], t), 0.0
+                self.seg_start_stamp = self.get_clock().now().nanoseconds * 1e-9   # HW4 (on_moving_obs)
         self.cmd_time = t
 
     def advance(self, t):
@@ -182,6 +234,8 @@ class Localizer(Node):
         # so the photo may be older (YOLO on the Pi is slow).
         still = stamp > self.last_motion + self.still_margin and age < self.max_still_age
         if not still:
+            if self.accept_moving and 0.0 <= age < self.max_moving_age:
+                self.on_moving_obs(data['obs'], age, stamp)
             return
         for o in data['obs']:
             if o['r'] > self.max_range:                 # too far: range too noisy (could misplace a new landmark)
@@ -196,6 +250,25 @@ class Localizer(Node):
             self.stop_buf.setdefault(o['id'], []).append((o['r'], o['b'], sr, sb))
             if len(self.stop_buf[o['id']]) >= self.fuse_frames:
                 self.fuse(o['id'])
+
+    def on_moving_obs(self, obs, age, stamp):
+        """HW4: a frame taken while DRIVING straight. The robot drove v * age since the photo, so
+        the tag is moved into where the camera is now (exact for a straight drive) and the noise is
+        raised a little for the speed error. Frames taken while turning in place are skipped: the
+        heading changed a lot since the photo (and the image is blurred). Frames of a moving robot
+        see different scenes, so each one is applied at once (no per-stop averaging)."""
+        v, w = self.current_speed()
+        if w != 0.0 or self.seg is None or stamp < self.seg_start_stamp:   # photo from before this drive
+            return
+        ds = v * age
+        for o in obs:
+            if o['r'] > self.max_range:
+                continue
+            x, y = o['r'] * math.cos(o['b']) - ds, o['r'] * math.sin(o['b'])   # camera frame, now
+            r, b = math.hypot(x, y), math.atan2(y, x)
+            sr = math.hypot(max(o['sr'], self.min_sr) * self.meas_scale, 0.3 * ds)
+            sb = math.hypot(max(o['sb'], self.min_sb) * self.meas_scale, 0.3 * ds / max(r, 0.3))
+            self.apply(o['id'], r, b, sr, sb)
 
     def fuse(self, lid):
         """One EKF update for tag lid from the mean of its buffered frames."""
@@ -213,6 +286,8 @@ class Localizer(Node):
 
     def apply(self, lid, r, b, sr, sb):
         """Feed one observation to the EKF (new landmark or gated update) and keep the counters."""
+        if self.known_map and lid not in self.ekf.ids:  # HW4: a tag that is not in the map
+            return
         result, d2 = self.ekf.update(lid, [r, b], np.diag([sr ** 2, sb ** 2]))
         if result == 'new':                         # first sighting: added to the map
             self.n_updates += 1

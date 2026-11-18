@@ -1,51 +1,29 @@
-# HW4 map: 10 ft x 10 ft area, one obstacle in the middle, start / goal on a diagonal.
-#
-# World frame (used by planner.py): origin = a corner of the area, x / y in meters.
-#   x = 0 .. width (to the right), y = 0 .. height (up), theta CCW-positive from +x.
-#   With the layout of the handout: Start near (width, 0), Goal near (0, height).
-#
-# TODO: measure everything below after setting up the area and replace the placeholders.
+tag_size: 0.165
 
 world:
-  width: 3.05                 # 10 ft
-  height: 3.05
+  width: 3.0
+  height: 3.0
 
 robot:
-  radius: 0.12                # TODO: half the robot's largest footprint dimension (m)
-  margin: 0.08                # extra clearance for localization / tracking error (m); inflation = radius + margin
-                              # (sim_hw4.py: ~10 cm off-path in the worst runs without a gyro)
+  radius: 0.12
+  margin: 0.08
 
-start: {x: 2.75, y: 0.30, theta_deg: 135}   # theta = the robot's facing at the start
-goal:  {x: 0.30, y: 2.75}
+start: {x: 0.30, y: 0.30}
+goal:  {x: 2.70, y: 2.70}
 
-# Obstacles: rectangles (cardboard boxes). cx, cy = center, w = size along x, h = size along y,
-# yaw_deg = rotation of the box (0 = sides parallel to the walls). Measure the FOOTPRINT on the floor.
 obstacles:
-  - {cx: 1.525, cy: 1.525, w: 0.45, h: 0.45, yaw_deg: 0}    # TODO: ~1.5 ft box
+  - {cx: 1.50, cy: 1.50, w: 0.393, h: 0.30, yaw_deg: 0}
 
-# AprilTags: id must match the detector's id ("tag<ID>"); x, y = tag center on the floor plane,
-# yaw_deg = direction the tag FACES (its outward normal); hw4_nav uses it to pick a tag to look at
-# when it re-localizes. Placeholders follow the handout figure.
 landmarks:
-  # outer ring (on the edges of the area)
-  tag0:  {x: 0.90, y: 3.05, yaw_deg: -90}   # top     (LM1)
-  tag1:  {x: 2.15, y: 3.05, yaw_deg: -90}   # top     (LM4)
-  tag2:  {x: 0.00, y: 2.45, yaw_deg: 0}     # left    (LM8)
-  tag3:  {x: 3.05, y: 2.45, yaw_deg: 180}   # right   (LM3)
-  tag4:  {x: 0.00, y: 0.60, yaw_deg: 0}     # left    (LM2)
-  tag5:  {x: 3.05, y: 0.60, yaw_deg: 180}   # right   (LM5)
-  tag6:  {x: 0.90, y: 0.00, yaw_deg: 90}    # bottom  (LM7)
-  tag7:  {x: 2.15, y: 0.00, yaw_deg: 90}    # bottom  (LM6)
-  # Tags on the obstacle are optional (Piazza). Uncomment / add one if localization drifts
-  # behind the box.
-  # tag8:  {x: 1.525, y: 1.75, yaw_deg: 90}   # obstacle top face
-  # tag9:  {x: 1.75, y: 1.525, yaw_deg: 0}    # obstacle right face
-  # tag10: {x: 1.525, y: 1.30, yaw_deg: -90}  # obstacle bottom face
-  # tag11: {x: 1.30, y: 1.525, yaw_deg: 180}  # obstacle left face
+  tag0:  {x: 3.00,  y: 0.508, yaw_deg: 180}
+  tag2:  {x: 3.00,  y: 2.492, yaw_deg: 180}
+  tag3:  {x: 2.492, y: 3.00,  yaw_deg: -90}
+  tag4:  {x: 0.508, y: 3.00,  yaw_deg: -90}
+  tag5:  {x: 0.00,  y: 2.492, yaw_deg: 0}
+  tag7:  {x: 0.00,  y: 0.508, yaw_deg: 0}
+  tag8:  {x: 0.508, y: 0.00,  yaw_deg: 90}
+  tag9:  {x: 2.492, y: 0.00,  yaw_deg: 90}
 
 planner:
-  voronoi_sample: 0.03        # m between boundary samples for the Voronoi diagram
-  simplify_tol: 0.04          # m: max deviation when removing near-collinear Voronoi points
-  output_frame: start         # only for the path_*.txt files (old closed_loop_control):
-                              # 'start' = relative to the start pose, 'world' = this map's frame.
-                              # hw4_nav plans by itself and always works in the world frame.
+  voronoi_sample: 0.03
+  simplify_tol: 0.04

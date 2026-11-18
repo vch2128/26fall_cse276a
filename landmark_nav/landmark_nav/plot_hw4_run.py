@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Plot a real HW4 run (the CSV written by hw4_nav) over the map: planned path vs the EKF
-trajectory, plus the speed commands over time. For the report.
+"""Plot a real HW4 run (the CSV written by hw4_control) over the map: planned path vs the
+localizer's trajectory, plus the wheel commands over time. For the report.
 
     python3 plot_hw4_run.py ~/ros2_ws/src/26fall_cse276a/traj_log/hw4_short_1118_153012.csv
     python3 plot_hw4_run.py run_short.csv run_safe.csv          # several runs on one map
@@ -49,11 +49,11 @@ def main():
         x, y = log['x'].astype(float), log['y'].astype(float)
         axes[0].plot(path['x'].astype(float), path['y'].astype(float), '--o', color=c, lw=1.2, ms=3, alpha=0.6)
         axes[0].plot(x, y, color=c, lw=2, label=f'{name} ({t[-1]:.1f} s)')
-        axes[1].plot(t, log['v'].astype(float), color=c, label=f'{name} v (m/s)')
-        axes[1].plot(t, log['w'].astype(float), color=c, ls=':', label=f'{name} w (rad/s)')
+        axes[1].plot(t, log['L'].astype(float), color=c, label=f'{name} L')
+        axes[1].plot(t, log['R'].astype(float), color=c, ls=':', label=f'{name} R')
     axes[0].legend(loc='lower left', fontsize=8)
     axes[1].set_xlabel('t (s)')
-    axes[1].set_title('commanded speed', fontsize=10)
+    axes[1].set_title('wheel commands', fontsize=10)
     axes[1].grid(alpha=0.3)
     axes[1].legend(fontsize=8)
     fig.tight_layout()

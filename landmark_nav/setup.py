@@ -27,6 +27,8 @@ setup(
             'detector = landmark_nav.detector_node:main',
             'localizer = landmark_nav.localizer_node:main',
             'closed_loop_control = landmark_nav.closed_loop_control:main',
+            'planner = landmark_nav.planner:main',
+            'hw4_nav = landmark_nav.hw4_nav:main',
         ],
     },
 )

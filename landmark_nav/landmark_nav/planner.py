@@ -18,6 +18,12 @@ they differ in the world representation:
                finds the shortest route along the diagram. The path is then simplified (nearly
                collinear points removed) without losing clearance, so the robot turns less.
 
+    shortest   RRT* (sampling-based alternative, plan_rrtstar): random tree in the same
+    (RRT*)     configuration space, with choose-parent + rewiring so the path length converges
+               toward the visibility-graph optimum; informed sampling once a path exists;
+               line-of-sight shortcutting before driving. Writes path_rrtstar.png (tree +
+               convergence vs the visibility-graph length).
+
 hw4_control.py calls plan_visibility / plan_voronoi at start-up. Run this file on its own to
 print the comparison table and save path_compare.png (both representations and paths, for the
 report) next to the map file unless --out is given.
@@ -302,6 +308,218 @@ def simplify(world, path):
     return rec(0, len(path) - 1) + [path[-1]]
 
 
+# ===================================================================== sampling-based planner
+def free_area(world, n=20000, seed=1):
+    """Monte-Carlo area (m^2) of the configuration-space free region (for the RRT* radius)."""
+    rng = np.random.default_rng(seed)
+    lo, hi = world.R, np.array([world.W - world.R, world.H - world.R])
+    pts = lo + rng.random((n, 2)) * (hi - lo)
+    free = sum(not any(inside_convex(p, poly) for poly in world.inflated) for p in pts)
+    return float(np.prod(hi - lo)) * free / n
+
+
+def plan_rrtstar(world, iters=3000, step=0.25, goal_bias=0.05, informed=True, seed=0, shortcut=True):
+    """Shortest path, sampling-based: RRT* (Karaman & Frazzoli 2011), optionally informed
+    (Gammell et al. 2014), on the same configuration space as plan_visibility (grown obstacles,
+    shrunk walls, the same world.segment_free test), so the two lengths can be compared directly.
+
+    Each iteration: sample a free point (the goal with probability goal_bias; once a path of cost
+    c_best exists and informed=True, only inside the ellipse with foci start / goal and major axis
+    c_best, since no point outside it can shorten the path), steer from the nearest node at most
+    `step` m toward it, then
+        choose parent   connect x_new to the node within radius r giving the lowest cost-to-come;
+        rewire          re-parent every node within r whose cost drops by going through x_new
+                        (the cost change is pushed down its subtree).
+    r = min(step, gamma * sqrt(log n / n)), gamma = 2 sqrt(1.5) sqrt(area_free / pi) (the 2-D
+    asymptotic-optimality bound). Nodes within `step` of the goal that see it are goal candidates;
+    the best path is the cheapest candidate + its straight segment to the goal.
+
+    Returns {'path', 'raw', 'nodes', 'edges', 'history', 'iters', 'first_iter'}:
+        raw      the RRT* tree path; path = raw shortcut (line-of-sight) if shortcut=True, which
+                 never makes it longer and removes the zig-zag before the robot drives it;
+        history  best raw path cost after every iteration (inf before the first solution);
+        first_iter  iteration of the first solution.
+    """
+    rng = np.random.default_rng(seed)
+    start, goal = np.asarray(world.start, float), np.asarray(world.goal, float)
+    lo, hi = np.array([world.R, world.R]), np.array([world.W - world.R, world.H - world.R])
+    gamma = 2.0 * math.sqrt(1.5) * math.sqrt(free_area(world) / math.pi)
+
+    nodes = np.zeros((iters + 1, 2))
+    nodes[0] = start
+    parent = [-1]
+    cost = [0.0]
+    children = [[]]
+    n = 1
+    goal_cand = []                                       # node indices that can see the goal
+    best_cost, best_node, first_iter = math.inf, None, None
+    history = np.full(iters, math.inf)
+
+    # informed-sampling ellipse frame
+    c_min = float(np.linalg.norm(goal - start))
+    centre = 0.5 * (start + goal)
+    a1 = (goal - start) / c_min
+    C = np.array([[a1[0], -a1[1]], [a1[1], a1[0]]])      # rotation: ellipse x axis -> start->goal
+
+    def in_cfree(p):
+        return (lo[0] <= p[0] <= hi[0] and lo[1] <= p[1] <= hi[1]
+                and not any(inside_convex(p, poly) for poly in world.inflated))
+
+    def sample():
+        if rng.random() < goal_bias:
+            return goal.copy()
+        while True:
+            if informed and best_cost < math.inf:
+                r1 = best_cost / 2.0
+                r2 = math.sqrt(max(best_cost ** 2 - c_min ** 2, 0.0)) / 2.0
+                u = rng.random() * 2 * math.pi
+                rad = math.sqrt(rng.random())             # uniform in the unit disk
+                p = centre + C @ np.array([r1 * rad * math.cos(u), r2 * rad * math.sin(u)])
+            else:
+                p = lo + rng.random(2) * (hi - lo)
+            if in_cfree(p):
+                return p
+
+    def push_cost(k, delta):
+        stack = [k]
+        while stack:
+            j = stack.pop()
+            cost[j] += delta
+            stack.extend(children[j])
+
+    for it in range(iters):
+        x_rand = sample()
+        d = np.linalg.norm(nodes[:n] - x_rand, axis=1)
+        k_near = int(np.argmin(d))
+        if d[k_near] < 1e-9:
+            history[it] = best_cost
+            continue
+        x_near = nodes[k_near]
+        x_new = x_near + (x_rand - x_near) * min(1.0, step / d[k_near])
+        if not world.segment_free(x_near, x_new):
+            history[it] = best_cost
+            continue
+
+        r = min(step, gamma * math.sqrt(math.log(n + 1) / (n + 1)))
+        dn = np.linalg.norm(nodes[:n] - x_new, axis=1)
+        near = [int(j) for j in np.flatnonzero(dn <= r)]
+        if k_near not in near:
+            near.append(k_near)
+
+        # ---- choose the best parent
+        free_to = {}
+        best_p, best_c = k_near, cost[k_near] + float(dn[k_near])
+        free_to[k_near] = True
+        for j in near:
+            c = cost[j] + float(dn[j])
+            if c < best_c:
+                ok = world.segment_free(nodes[j], x_new)
+                free_to[j] = ok
+                if ok:
+                    best_p, best_c = j, c
+        new = n
+        nodes[new] = x_new
+        parent.append(best_p)
+        cost.append(best_c)
+        children.append([])
+        children[best_p].append(new)
+        n += 1
+
+        # ---- rewire the neighbourhood through x_new
+        for j in near:
+            if j == best_p:
+                continue
+            c = best_c + float(dn[j])
+            if c < cost[j] - 1e-12:
+                ok = free_to.get(j)
+                if ok is None:
+                    ok = world.segment_free(x_new, nodes[j])
+                if ok:
+                    children[parent[j]].remove(j)
+                    parent[j] = new
+                    children[new].append(j)
+                    push_cost(j, c - cost[j])
+
+        # ---- goal connection
+        dg = float(np.linalg.norm(goal - x_new))
+        if dg <= step and world.segment_free(x_new, goal):
+            goal_cand.append(new)
+        if goal_cand:
+            cands = [(cost[k] + float(np.linalg.norm(goal - nodes[k])), k) for k in goal_cand]
+            c, k = min(cands)
+            if c < best_cost:
+                if first_iter is None:
+                    first_iter = it + 1
+                best_cost, best_node = c, k
+        history[it] = best_cost
+
+    if best_node is None:
+        raise RuntimeError(f'RRT*: no path after {iters} iterations (more iters / larger step?)')
+    raw = [goal]
+    k = best_node
+    while k != -1:
+        raw.append(nodes[k].copy())
+        k = parent[k]
+    raw = raw[::-1]
+    edges = [(nodes[parent[k]], nodes[k]) for k in range(1, n)]
+    path = shortcut_path(world, raw) if shortcut else raw
+    return {'path': path, 'raw': raw, 'nodes': nodes[:n].copy(), 'edges': edges,
+            'history': history, 'iters': iters, 'first_iter': first_iter}
+
+
+def shortcut_path(world, path):
+    """Greedy line-of-sight shortcutting: from each kept point jump to the farthest later point it
+    can see (world.segment_free). Never longer than the input."""
+    path = [np.asarray(p, float) for p in path]
+    out, i = [path[0]], 0
+    while i < len(path) - 1:
+        j = len(path) - 1
+        while j > i + 1 and not world.segment_free(path[i], path[j]):
+            j -= 1
+        out.append(path[j])
+        i = j
+    return out
+
+
+def plot_rrt(world, rrt, vis_len, filename):
+    """RRT* tree + path, and the best cost vs iteration against the visibility-graph optimum."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6), gridspec_kw={'width_ratios': [1.0, 1.1]})
+    ax = axes[0]
+    draw_world(ax, world, f'Min distance: RRT* ({rrt["iters"]} iterations, {len(rrt["nodes"])} nodes)')
+    ax.add_collection(LineCollection([[a, b] for a, b in rrt['edges']], colors='#c9b3e0', lw=0.5, zorder=1))
+    r = np.array(rrt['raw'])
+    ax.plot(r[:, 0], r[:, 1], ':', color='#6a3d9a', lw=1.3, zorder=2,
+            label=f'RRT* tree path {sum(np.linalg.norm(np.diff(r, axis=0), axis=1)):.3f} m')
+    p = np.array(rrt['path'])
+    ax.plot(p[:, 0], p[:, 1], '-o', color='#6a3d9a', lw=2.5, ms=5, zorder=3,
+            label=f'after shortcutting {sum(np.linalg.norm(np.diff(p, axis=0), axis=1)):.3f} m')
+    ax.legend(loc='lower left', fontsize=8)
+
+    ax = axes[1]
+    h = rrt['history']
+    it = np.arange(1, len(h) + 1)
+    ax.plot(it, h, color='#6a3d9a', lw=2, label='RRT* best path cost')
+    ax.axhline(vis_len, color='#d0521b', ls='--', lw=1.5, label=f'visibility graph (optimal) {vis_len:.3f} m')
+    if rrt['first_iter']:
+        ax.axvline(rrt['first_iter'], color='gray', ls=':', lw=1, label=f'first solution (iter {rrt["first_iter"]})')
+    fin = h[np.isfinite(h)]
+    if len(fin):
+        ax.set_ylim(vis_len * 0.98, max(fin[0], vis_len) * 1.05)
+    ax.set_xlabel('iteration')
+    ax.set_ylabel('path length (m)')
+    ax.set_title('Convergence toward the shortest path', fontsize=10)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=150)
+    plt.close(fig)
+
+
 # ===================================================================== outputs
 def metrics(world, path):
     length = sum(float(np.linalg.norm(b - a)) for a, b in zip(path, path[1:]))
@@ -397,6 +615,10 @@ def main():
     ap.add_argument('--map', default=default_map(), help='map yaml (default: config/map_hw4.yaml)')
     ap.add_argument('--out', default=None, help='output folder (default: the map file folder)')
     ap.add_argument('--no-plot', action='store_true')
+    ap.add_argument('--rrt-iters', type=int, default=3000, help='RRT* iterations')
+    ap.add_argument('--rrt-step', type=float, default=0.25, help='RRT* steer step (m)')
+    ap.add_argument('--seed', type=int, default=0, help='RRT* random seed')
+    ap.add_argument('--no-informed', action='store_true', help='plain RRT* sampling')
     args = ap.parse_args()
 
     with open(args.map) as f:
@@ -408,22 +630,36 @@ def main():
 
     vis = plan_visibility(world)
     vor = plan_voronoi(world)
+    import time
+    t_rrt = time.perf_counter()
+    rrt = plan_rrtstar(world, iters=args.rrt_iters, step=args.rrt_step, seed=args.seed,
+                       informed=not args.no_informed)
+    t_rrt = time.perf_counter() - t_rrt
     m_vis, m_vor = metrics(world, vis['path']), metrics(world, vor['path'])
+    m_rrt = metrics(world, rrt['path'])
+    m_raw = metrics(world, rrt['raw'])
 
-    print(f'\n{"":24s}{"shortest":>12s}{"safest":>12s}')
+    print(f'\n{"":24s}{"shortest":>12s}{"safest":>12s}{"RRT* raw":>12s}{"RRT*":>12s}')
     rows = [('path length (m)', 'length', '.3f'), ('min clearance (m)', 'clearance', '.3f'),
             ('robot body gap (m)', 'gap', '.3f'), ('obstacle clearance (m)', 'obstacle', '.3f'),
             ('legs', 'waypoints', 'd'),
             ('total turning (deg)', 'turning_deg', '.0f')]
     for label, key, fmt in rows:
-        print(f'{label:24s}{format(m_vis[key], fmt):>12s}{format(m_vor[key], fmt):>12s}')
+        print(f'{label:24s}{format(m_vis[key], fmt):>12s}{format(m_vor[key], fmt):>12s}'
+              f'{format(m_raw[key], fmt):>12s}{format(m_rrt[key], fmt):>12s}')
+    print(f'RRT*: {args.rrt_iters} iterations in {t_rrt:.1f} s, first solution at iteration '
+          f'{rrt["first_iter"]}, raw path {100 * (m_raw["length"] / m_vis["length"] - 1):.1f} % '
+          f'longer than the visibility graph')
 
-    for res, label in ((vis, 'shortest (visibility graph)'), (vor, 'safest (Voronoi)')):
+    for res, label in ((vis, 'shortest (visibility graph)'), (vor, 'safest (Voronoi)'), (rrt, 'shortest (RRT*)')):
         print(f'\n{label}: ' + ' -> '.join(f'({p[0]:.2f}, {p[1]:.2f})' for p in res['path']))
     if not args.no_plot:
         fn = os.path.join(out, 'path_compare.png')
         plot(world, vis, vor, m_vis, m_vor, fn)
         print(f'\nwrote {fn}')
+        fn = os.path.join(out, 'path_rrtstar.png')
+        plot_rrt(world, rrt, m_vis['length'], fn)
+        print(f'wrote {fn}')
 
 
 if __name__ == '__main__':

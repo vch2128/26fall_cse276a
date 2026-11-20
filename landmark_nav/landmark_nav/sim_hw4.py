@@ -26,6 +26,8 @@ import types
 
 import numpy as np
 
+VERBOSE = False                                            # -v: print hw4_control's console output
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, '..', '..'))
 sys.path[:0] = [HERE, os.path.join(REPO, 'landmark_nav'), os.path.join(REPO, 'robot_control')]
@@ -185,7 +187,8 @@ def run(mode, map_file, ctl_set, loc_set, T, seed, t_max=180.0):
     loc = localizer_node.Localizer()
     world, path, tags, met = hw4_control.load_map(map_file, mode)
     cfg = dict(hw4_control.DEFAULTS, **ctl_set)
-    ctl = hw4_control.PivotController(path, tags, cfg, mo)
+    ctl = hw4_control.PivotController(path, tags, cfg, mo,
+                                      say=(lambda m: print(f'[{Clock.t:6.2f}] {m}')) if VERBOSE else None)
     String = sys.modules['std_msgs.msg'].String
     F32 = sys.modules['std_msgs.msg'].Float32MultiArray
 
@@ -213,6 +216,7 @@ def run(mode, map_file, ctl_set, loc_set, T, seed, t_max=180.0):
         if Clock.t >= next_ctl - 1e-9:                     # 20 Hz: localizer predict, then controller
             next_ctl += ctl_dt
             loc.on_timer()
+            ctl.n_updates = loc.n_updates                  # = the landmark_updates topic (hw4_control 'verify')
             pose, sigma = est()
             L, R = ctl.tick(Clock.t, pose, sigma)
             loc.on_cmd(F32(data=[L, R]))
@@ -306,7 +310,10 @@ def main():
     ap.add_argument('--set', action='append', help='hw4_control setting, e.g. realign_tol_deg=20')
     ap.add_argument('--loc', action='append', help='localizer parameter, e.g. meas_scale=2.0')
     ap.add_argument('--truth', action='append', help='simulated world, e.g. fps=5')
+    ap.add_argument('-v', '--verbose', action='store_true', help="print hw4_control's console output")
     args = ap.parse_args()
+    global VERBOSE
+    VERBOSE = args.verbose
     install_stubs({})
     T = dict(TRUTH, **kv(args.truth))
     map_file = os.path.abspath(args.map)

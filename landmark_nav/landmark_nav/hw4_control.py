@@ -11,7 +11,10 @@ Driving uses only the commands calibrated in robot_control/motion.py:
       while robot_pose is watched, until the waypoint is reached or passed;
     - a corner is a timed turn in place (motion.table_time on CCW_TABLE / CW_TABLE, with the same
       ramp as motion.send), and the next leg starts right after it (no STOP_SECONDS, no SETTLE);
-    - if the heading drifts more than realign_tol while driving, a short timed turn re-aims it.
+    - if the heading drifts more than realign_tol while driving, a short timed turn re-aims it;
+    - after every aim / realign turn the robot stands still ('verify') until the localizer has fused
+      a still tag view (landmark_updates goes up) or verify_max passes; the heading is then checked
+      again with the corrected estimate, so a turn that the tables got wrong is fixed before driving.
 The localizer does the odometry from these commands with the same tables, and corrects it with
 tags while the robot moves. Re-localization: if the pose sigma gets too large, turn to the known
 tag that needs the smallest turn, stand still (the localizer's still-frame fusion) until the sigma
@@ -21,6 +24,13 @@ Run (motor_control, camera, detector, localizer as in hw4_launch.py):
     ros2 run landmark_nav hw4_control --ros-args -p mode:=short
     ros2 run landmark_nav hw4_control --ros-args -p mode:=safe
 Writes <log_dir>/hw4_<mode>_<time>.csv and ..._path.csv  ->  python3 plot_hw4_run.py <csv>
+
+Console output (same layout as closed_loop_control in HW3):
+    --> waypoint k/N (x, y)            a new leg
+      aim / realign turn, verify       indented: what the robot does on that leg
+      driving: est=... to go           every print_dist m while driving
+      re-localize / re-localized       (with sigma)
+    == goal reached ...                final estimate, sigma and run statistics
 """
 import csv
 import math
@@ -54,7 +64,20 @@ DEFAULTS = {
     'reloc_cooldown': 0.4,        # m driven after a re-localization before the next one
     'reloc_min_remaining': 0.35,  # m this close to the goal: just finish
     'reloc_max_tries': 4,
+    'verify_turns': True,         # stand still after every aim / realign turn until a tag is fused
+    'verify_max': 2.0,            # s give up after this (no tag in view): drive on
+    'print_dist': 0.3,            # m between 'driving: ...' progress lines
 }
+
+
+def fmt_pose(pose):
+    x, y, th = pose[:3]
+    return f'est=({x:.3f}, {y:.3f}, {math.degrees(th):+.1f}deg)'
+
+
+def fmt_sigma(sigma):
+    sx, sy, sth = sigma
+    return f'sigma=({sx:.3f}, {sy:.3f}, {math.degrees(sth):.1f}deg)'
 
 
 def wrap(a):
@@ -64,7 +87,7 @@ def wrap(a):
 class PivotController:
     """No ROS: tick(t, pose, sigma) -> (L, R). `mo` is robot_control.motion (calibration + helpers)."""
 
-    def __init__(self, path, tags, cfg, mo):
+    def __init__(self, path, tags, cfg, mo, say=None):
         self.path = np.array(path, dtype=float)
         self.tags = tags                                   # {id: (x, y, facing_rad)}
         self.c = cfg
@@ -77,6 +100,15 @@ class PivotController:
         self.last_xy = None
         self.turns_in_row = 0
         self.since_turn = 0.0                              # m driven since the last turn
+        self.n_updates = 0                                 # localizer's landmark_updates (fed by main / sim)
+        self.n_at_verify = 0
+        self.say = say or (lambda msg: None)               # console output (main: print; sim: silent)
+        self.pose, self.sigma = None, None                 # latest, for the messages
+        self.announced = 0                                 # last waypoint printed as '--> waypoint'
+        self.reloc_lid = None
+        self.since_print = 0.0
+        self.n_verify, self.n_verify_fused = 0, 0          # statistics for the final line
+        self.t_still = 0.0                                 # s not driving (settle, spin, verify, look)
 
     # ---------------------------------------------------------------- helpers
     def _set(self, state, t):
@@ -98,7 +130,10 @@ class PivotController:
         """Skip waypoints that are reached or passed. False when the goal is done."""
         while self.i < len(self.path):
             wp, prev = self.path[self.i], self.path[self.i - 1]
-            if np.linalg.norm(wp - p) < self.c['near'] or np.dot(wp - p, wp - prev) < 0.0:
+            d = float(np.linalg.norm(wp - p))
+            if d < self.c['near'] or np.dot(wp - p, wp - prev) < 0.0:
+                how = 'reached' if d < self.c['near'] else 'passed'
+                self.say(f'  waypoint {self.i} {how} ({d * 100:.1f} cm away): {fmt_pose(self.pose)}')
                 self.i += 1
             else:
                 return True
@@ -129,10 +164,21 @@ class PivotController:
         if not self._advance(p):
             self._set('done', t)
             return
+        if self.i != self.announced:
+            self.announced = self.i
+            wx, wy = self.path[self.i]
+            self.say(f'--> waypoint {self.i}/{len(self.path) - 1} ({wx:.2f}, {wy:.2f}): '
+                     f'{np.linalg.norm(self.path[self.i] - p):.2f} m, {fmt_pose(pose)}')
         err = self._heading_err(pose)
-        if abs(err) > math.radians(self.c['aim_tol_deg']) and self._start_spin(t, err, 'drive'):
-            return
+        if abs(err) > math.radians(self.c['aim_tol_deg']):
+            if self._start_spin(t, err, 'drive'):
+                self.say(f'  aim turn {math.degrees(err):+.1f}deg')
+                return
+            if self.turns_in_row >= self.c['max_turns_in_row']:
+                self.say(f'  {self.turns_in_row} turns in a row -> driving with heading error '
+                         f'{math.degrees(err):+.1f}deg')
         if self.state != 'drive':
+            self.since_print = 0.0
             self.t_motion = t
         self._set('drive', t)
 
@@ -160,6 +206,11 @@ class PivotController:
             if best is None or abs(b) < abs(best[0]):
                 best = (b, lid)
         if best is None or len(self.tried) >= self.c['reloc_max_tries']:
+            if best is None and not self.tried:
+                self.say(f'  re-localize: no usable tag from here ({fmt_sigma(self.sigma)}) -> driving on')
+            else:
+                self.say(f'  re-localize: {len(self.tried)} tag(s) tried, still {fmt_sigma(self.sigma)} '
+                         f'-> driving on')
             self.tried.clear()
             self.driven = 0.0
             self._start_leg(t, pose)                   # nothing to look at: drive on
@@ -167,6 +218,10 @@ class PivotController:
         b, lid = best
         self.tried.add(lid)
         self.n_reloc += 1
+        self.reloc_lid = lid
+        tx, ty, _ = self.tags[lid]
+        self.say(f'  re-localize #{self.n_reloc}: {fmt_sigma(self.sigma)} -> turn {math.degrees(b):+.1f}deg '
+                 f'to {lid} ({math.hypot(tx - x, ty - y):.2f} m)')
         if not self._start_spin(t, b, 'look'):
             self._set('look', t)
 
@@ -174,12 +229,22 @@ class PivotController:
     def tick(self, t, pose, sigma):
         c, mo = self.c, self.mo
         p = np.asarray(pose[:2])
+        self.pose, self.sigma = pose, sigma
         if self.t_state is None:
             self.t_state = t
+            self.t_last = t
+        if self.state != 'drive':
+            self.t_still += t - self.t_last
+        self.t_last = t
         if self.last_xy is not None and self.state == 'drive':
             step = float(np.linalg.norm(p - self.last_xy))
             self.driven += step
             self._drove(step)
+            self.since_print += step
+            if self.since_print >= c['print_dist'] and self.i < len(self.path):
+                self.since_print = 0.0
+                self.say(f'  driving: {fmt_pose(pose)}  {np.linalg.norm(self.path[self.i] - p):.2f} m to go, '
+                         f'{fmt_sigma(sigma)}')
         self.last_xy = p
 
         if self.state == 'settle' and t - self.t_state >= c['start_wait']:
@@ -187,14 +252,32 @@ class PivotController:
         elif self.state == 'spin' and t >= self.spin_end:
             if self.after_spin == 'look':
                 self._set('look', t)
+            elif c['verify_turns']:
+                self.n_at_verify = self.n_updates
+                self.n_verify += 1
+                self._set('verify', t)
             else:
                 self._start_leg(t, pose)
+        elif self.state == 'verify':
+            fused = self.n_updates > self.n_at_verify
+            if fused or t - self.t_state >= c['verify_max']:
+                if fused:
+                    self.n_verify_fused += 1
+                    self.say(f'  verify: tag fused after {t - self.t_state:.1f} s, {fmt_pose(pose)}, '
+                             f'heading error {math.degrees(self._heading_err(pose)):+.1f}deg')
+                else:
+                    self.say(f'  verify: no tag in {c["verify_max"]:.1f} s -> heading from the turn table '
+                             f'({fmt_sigma(sigma)})')
+                self._start_leg(t, pose)                   # re-checks the heading with the corrected estimate
         elif self.state == 'look':
             if t - self.t_state >= c['reloc_look_min'] and not self._uncertain(sigma):
+                self.say(f'  re-localized after {t - self.t_state:.1f} s: {fmt_pose(pose)}, {fmt_sigma(sigma)}')
                 self.tried.clear()
                 self.driven = 0.0
                 self._start_leg(t, pose)
             elif t - self.t_state >= c['reloc_look_max']:
+                self.say(f'  {self.reloc_lid}: still {fmt_sigma(sigma)} after {c["reloc_look_max"]:.1f} s '
+                         f'-> another tag')
                 self._start_reloc(t, pose)             # that tag did not help: another one
         elif self.state == 'drive':
             i_before = self.i
@@ -208,8 +291,9 @@ class PivotController:
             else:
                 err = self._heading_err(pose)
                 d = float(np.linalg.norm(self.path[self.i] - p))
-                if abs(err) > math.radians(c['realign_tol_deg']) and d > c['realign_min_dist']:
-                    self._start_spin(t, err, 'drive')
+                if (abs(err) > math.radians(c['realign_tol_deg']) and d > c['realign_min_dist']
+                        and self._start_spin(t, err, 'drive')):
+                    self.say(f'  realign turn {math.degrees(err):+.1f}deg ({d:.2f} m to go), {fmt_pose(pose)}')
 
         if self.state == 'drive':
             k = self._ramp(t)
@@ -242,7 +326,7 @@ def load_map(map_file, mode):
 def main():
     import rclpy
     from geometry_msgs.msg import PoseWithCovarianceStamped
-    from std_msgs.msg import Float32MultiArray
+    from std_msgs.msg import Float32MultiArray, Int32
 
     import robot_control.motion as mo
 
@@ -257,13 +341,17 @@ def main():
     cfg = {k: p(k, v).value for k, v in DEFAULTS.items()}
     log = node.get_logger()
 
+    def say(msg):
+        print(msg, flush=True)                             # flush: ros2 run buffers stdout otherwise
+
     world, path, tags, met = load_map(map_file, mode)
-    ctl = PivotController(path, tags, cfg, mo)
-    log.info(f'{mode} path ({met["length"]:.2f} m, {met["waypoints"]} legs, obstacle clearance '
-             f'{met["obstacle"]:.2f} m): ' + ' -> '.join(f'({x:.2f}, {y:.2f})' for x, y in path))
+    ctl = PivotController(path, tags, cfg, mo, say=say)
+    say(f'{mode} path from {map_file}: {met["length"]:.2f} m, {met["waypoints"]} legs, '
+        f'obstacle clearance {met["obstacle"]:.2f} m')
+    say('  ' + ' -> '.join(f'({x:.2f}, {y:.2f})' for x, y in path))
 
     pub = node.create_publisher(Float32MultiArray, 'motor_commands', 10)
-    state = {'pose': None, 'sigma': None}
+    state = {'pose': None, 'sigma': None, 'updates': None}
 
     def on_pose(msg):
         q, cov = msg.pose.pose.orientation, msg.pose.covariance
@@ -271,6 +359,11 @@ def main():
         state['sigma'] = tuple(math.sqrt(max(0.0, cov[i])) for i in (0, 7, 35))
 
     node.create_subscription(PoseWithCovarianceStamped, 'robot_pose', on_pose, 10)
+
+    def on_updates(msg):                                   # tag updates used by the localizer (verify)
+        ctl.n_updates = state['updates'] = msg.data
+
+    node.create_subscription(Int32, 'landmark_updates', on_updates, 10)
 
     def send(L, R):
         msg = Float32MultiArray()
@@ -288,26 +381,24 @@ def main():
     out.writerow(['t', 'x', 'y', 'theta', 'sx', 'sy', 'stheta', 'L', 'R', 'state'])
 
     # the start pose in map_hw4.yaml must be the localizer's start pose (same map_file)
-    while rclpy.ok() and state['pose'] is None:
-        log.info('waiting for robot_pose (is the localizer running with map_file?)', throttle_duration_sec=2.0)
+    while rclpy.ok() and (state['pose'] is None or state['updates'] is None):
+        log.info('waiting for robot_pose and landmark_updates (is the localizer running with map_file?)',
+                 throttle_duration_sec=2.0)
         rclpy.spin_once(node, timeout_sec=0.1)
     x0, y0, _ = state['pose']
     if math.hypot(x0 - world.start[0], y0 - world.start[1]) > 0.2:
         log.warn(f'robot_pose starts at ({x0:.2f}, {y0:.2f}), not at the map start: '
                  'is the localizer running with -p map_file:=... ?')
+    say(f'start: {fmt_pose(state["pose"])}  {fmt_sigma(state["sigma"])}')
 
     t0 = time.monotonic()
     period = 1.0 / cfg['rate']
-    prev = None
     try:
         while rclpy.ok() and not ctl.done:
             t_next = time.monotonic() + period
             t = time.monotonic() - t0
             L, R = ctl.tick(t, state['pose'], state['sigma'])
             send(L, R)
-            if ctl.state != prev:
-                log.info(f'{prev} -> {ctl.state}  (waypoint {ctl.i}/{len(path) - 1})')
-                prev = ctl.state
             out.writerow([f'{t:.3f}', *(f'{v:.4f}' for v in state['pose']), *(f'{v:.4f}' for v in state['sigma']),
                           f'{L:.3f}', f'{R:.3f}', ctl.state])
             while time.monotonic() < t_next:
@@ -315,10 +406,14 @@ def main():
         if ctl.done:
             x, y, _ = state['pose']
             gx, gy = path[-1]
-            log.info(f'== goal reached in {time.monotonic() - t0:.1f} s, estimate {math.hypot(gx - x, gy - y) * 100:.1f} cm '
-                     f'from the goal, {ctl.n_reloc} re-localizations. log: {name}')
+            t_end = time.monotonic() - t0
+            say(f'== goal reached at t = {t_end:.1f} s: {fmt_pose(state["pose"])}  {fmt_sigma(state["sigma"])}')
+            say(f'   estimate {math.hypot(gx - x, gy - y) * 100:.1f} cm from the goal ({gx:.2f}, {gy:.2f}); '
+                f'{ctl.n_reloc} re-localization(s), {ctl.n_verify} turn check(s) ({ctl.n_verify_fused} with a tag), '
+                f'not driving {ctl.t_still:.1f} s of {t_end:.1f} s')
+            say(f'   log: {name}')
     except KeyboardInterrupt:
-        pass
+        say(f'== stopped (Ctrl-C) at waypoint {ctl.i}/{len(path) - 1}: {fmt_pose(state["pose"])}')
     finally:
         log_f.close()
         end = time.monotonic() + 1.0

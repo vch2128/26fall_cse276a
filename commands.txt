@@ -3,8 +3,6 @@ source /opt/ros/jazzy/setup.bash
 
 ros2 run robot_control calibrate
 ros2 run robot_control motor_control
-ros2 run robot_control velocity_control
-ros2 run robot_vision 
 
 ros2 run robot_control calibrate --ros-args -p L:=0.35 -p R:=-0.35 -p gain_l_fwd:=0.93 -p duration:=0.6
 
@@ -17,32 +15,6 @@ ros2 run robot_control calibrate --ros-args -p log_file:=~/ros2_ws/logs/spin_tes
 
 ros2 run robot_control calibrate --ros-args -p L:=0.2 -p R:=0.2 -p duration:=3.0
 
-for c in 0.35; do for d in ccw; do for n in 1; do
-  if [ $d = ccw ]; then L=-$c; R=$c; else L=$c; R=-$c; fi
-  ros2 run robot_control calibrate --ros-args -p L:=$L -p R:=$R -p duration:=1.0 \
-    -p ask_distance:=false -p label:=spin_${d}_${c}_t$n
-  read -p "Enter for next"
-done; done; done
-
-# left (ccw)
-ros2 run robot_control calibrate --ros-args -p L:=-0.3 -p R:=0.3 -p gain_l_rev:=0.94 -p gain_r_fwd:=1.08 -p duration:=0.95
-45 dur=0.65
-90 dur=1.065
-135 dur=1.4
-180 dur=1.85
-
-# right (cw)
-ros2 run robot_control calibrate --ros-args -p L:=0.3 -p R:=-0.3 -p gain_l_fwd:=0.9 -p duration:=1.0 
-45 dur=0.555
-90 dur 1.04
-135 dur 1.38
-180 dur 1.95
-
-
-#t1
-source /opt/ros/jazzy/setup.bash
-source ~/ros2_ws/install/setup.bash
-ros2 launch robot_vision_camera robot_vision_camera.launch.py
 
 #t2
 source /opt/ros/jazzy/setup.bash
@@ -61,15 +33,12 @@ colcon build --packages-select landmark_nav
 ## apriltag
 ros2 run robot_control motor_control
 ros2 launch robot_vision_camera robot_vision_camera.launch.py
-ros2 launch landmark_nav hw4_launch.py
 
 ros2 run landmark_nav hw4_control --ros-args -p mode:=safe
 ros2 run landmark_nav hw4_control --ros-args -p mode:=short
 
-# tests
-ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks_test2m.yaml -p model:=yolo26n.pt
-ros2 run landmark_nav localizer --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks_test2m.yaml
-ros2 run landmark_nav closed_loop_control test_2m.txt
+ros2 run landmark_nav detector
+ros2 run landmark_nav localizer --ros-args -p map_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/map_hw4.yaml -p accept_moving:=true
 
 # camera
 sudo dmesg | grep -i "probe success"

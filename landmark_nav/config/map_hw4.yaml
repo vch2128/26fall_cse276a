@@ -12,7 +12,7 @@ start: {x: 0.40, y: 0.40}
 goal:  {x: 2.60, y: 2.60}
 
 obstacles:
-  - {cx: 1.50, cy: 1.50, w: 0.393, h: 0.30, yaw_deg: 0}
+  - {cx: 1.50, cy: 1.50, w: 0.33, h: 0.45, yaw_deg: 0}
 
 landmarks:
   tag0:  {x: 3.00,  y: 0.508, yaw_deg: 180}

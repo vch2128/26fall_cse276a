@@ -61,10 +61,9 @@ colcon build --packages-select landmark_nav
 ## apriltag
 ros2 run robot_control motor_control
 ros2 launch robot_vision_camera robot_vision_camera.launch.py
+ros2 run landmark_nav detector
 ros2 launch landmark_nav hw4_launch.py
-
 ros2 run landmark_nav hw4_control --ros-args -p mode:=safe
-ros2 run landmark_nav hw4_control --ros-args -p mode:=short
 
 # tests
 ros2 run landmark_nav detector --ros-args -p landmarks_file:=/home/ubuntu/ros2_ws/src/26fall_cse276a/landmark_nav/config/landmarks_test2m.yaml -p model:=yolo26n.pt

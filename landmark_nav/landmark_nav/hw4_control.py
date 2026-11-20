@@ -47,13 +47,14 @@ except ImportError:                                   # sim_hw4.py from this fol
 DEFAULTS = {
     'rate': 20.0,                 # Hz (motor_control stops after 0.15 s without a command)
     'start_wait': 1.0,            # s standing still at the start (first fix)
-    'aim_tol_deg': 8.0,           # turn before a leg if the heading error is larger (smaller turns
+    'aim_tol_deg': 12.0,           # turn before a leg if the heading error is larger (smaller turns
                                   #   are poorly modelled by the turn tables: they are extrapolated)
     'max_turns_in_row': 3,        # after this many turns without driving `turn_reset_dist` in between,
     'turn_reset_dist': 0.10,      #   drive anyway (stops back-and-forth turning if the turn tables are off)
-    'realign_tol_deg': 12.0,      # while driving: re-aim if the error grows past this ...
+    'realign_tol_deg': 15.0,      # while driving: re-aim if the error grows past this ...
     'realign_min_dist': 0.25,     # m ... and the waypoint is still this far
     'near': 0.06,                 # m waypoint reached (also when it is passed)
+    'reloc_enabled': False,        # turn to a known tag and stand still when the pose gets uncertain
     'reloc_sigma_xy': 0.08,       # m   re-localize when the position sigma is larger ...
     'reloc_sigma_th_deg': 10.0,   # ... or the heading sigma is larger
     'reloc_look_min': 0.3,        # s standing still facing a tag, at least ...
@@ -285,8 +286,8 @@ class PivotController:
                 self._set('done', t)
             elif self.i != i_before:                       # corner: turn if needed, else drive on
                 self._start_leg(t, pose)
-            elif (self.driven > c['reloc_cooldown'] and self.remaining(p) > c['reloc_min_remaining']
-                  and self._uncertain(sigma)):
+            elif (c['reloc_enabled'] and self.driven > c['reloc_cooldown']
+                  and self.remaining(p) > c['reloc_min_remaining'] and self._uncertain(sigma)):
                 self._start_reloc(t, pose)
             else:
                 err = self._heading_err(pose)

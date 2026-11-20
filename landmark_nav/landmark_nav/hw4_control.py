@@ -43,20 +43,20 @@ DEFAULTS = {
     'rate': 20.0,                 # Hz (motor_control stops after 0.15 s without a command)
     # ---- start: stand still until the localizer has a tag fix
     'start_wait': 1.0,            # s standing still at the start, at least ...
-    'start_min_fixes': 1,         # ... until the localizer has used this many tag observations ...
+    'start_min_fixes': 0,         # ... until the localizer has used this many tag observations ...
     'start_sigma_xy': 0.05,       # ... and the pose is this certain (m) ...
     'start_sigma_th_deg': 6.0,    # ... (deg)
     'start_max_wait': 15.0,       # s: give up waiting and go anyway (no tag in view?)
     # ---- look once after the first turn
-    'look_after_first_turn': True,
+    'look_after_first_turn': False,
     'look_min': 0.5,              # s standing still, at least ...
     'look_max': 2.0,              # s ... and at most, waiting for a new tag fix
     # ---- turning
-    'aim_tol_deg': 8.0,           # turn before a leg if the heading error is larger (smaller turns
+    'aim_tol_deg': 15.0,           # turn before a leg if the heading error is larger (smaller turns
                                   #   are poorly modelled by the turn tables: they are extrapolated)
     'max_turns_in_row': 3,        # after this many turns without driving `turn_reset_dist` in between,
     'turn_reset_dist': 0.10,      #   drive anyway (stops back-and-forth turning if the turn tables are off)
-    'realign_tol_deg': 12.0,      # while driving: re-aim if the error grows past this ...
+    'realign_tol_deg': 18.0,      # while driving: re-aim if the error grows past this ...
     'realign_min_dist': 0.25,     # m ... and the waypoint is still this far
     # ---- waypoints
     'near': 0.06,                 # m waypoint reached (also when it is passed)

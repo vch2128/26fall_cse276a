@@ -26,4 +26,4 @@ landmarks:
 
 planner:
   voronoi_sample: 0.03
-  simplify_tol: 0.15
+  simplify_tol: 0.08

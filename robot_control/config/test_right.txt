@@ -1,3 +1,0 @@
-# Turn right 90 deg in place
-0,0,0
-0,0,-1.57

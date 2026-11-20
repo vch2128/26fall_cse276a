@@ -1,5 +1,3 @@
-from glob import glob
-
 from setuptools import find_packages, setup
 
 package_name = 'robot_control'
@@ -13,7 +11,6 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/robot_teleop_launch.py']),
-        ('share/' + package_name + '/config', glob('config/*.txt')),
     ],
     install_requires=[
         'setuptools',
@@ -31,7 +28,6 @@ setup(
         'console_scripts': [
             'motor_control = robot_control.motor_control:main',
             # 'keyboard_control = robot_control.keyboard_control:main',
-            'velocity_control = robot_control.velocity_control:main',
             'calibrate = robot_control.calibrate:main',
         ],
     },

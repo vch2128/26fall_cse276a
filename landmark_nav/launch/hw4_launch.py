@@ -1,8 +1,8 @@
-"""HW4: detector + localizer (known map, observations while driving).
+"""HW4: detector + localizer (known map, tag observations also while driving).
 Start motor_control and the camera launch separately (as before), then the controller in its own
 terminal once the localizer is up:
     ros2 launch landmark_nav hw4_launch.py
-    ros2 run landmark_nav hw4_control --ros-args -p mode:=short      # or mode:=safe
+    ros2 run landmark_nav hw4_control --ros-args -p mode:=safe       # or mode:=rrt
 Each run of hw4_control starts from the map's start pose, so restart this launch (the localizer)
 before every run.
 """
@@ -26,7 +26,6 @@ def generate_launch_description():
              parameters=[{'landmarks_file': m}]),                    # tag_size from the map
         Node(package='landmark_nav', executable='localizer', name='landmark_localizer', output='screen',
              parameters=[{'map_file': m,
-                          'accept_moving': True,
                           'sigma_th_per_rad': 0.15,
                           'cam_offset': ParameterValue(LaunchConfiguration('cam_offset'), value_type=float)}]),
     ])

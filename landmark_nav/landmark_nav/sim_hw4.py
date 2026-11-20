@@ -9,22 +9,22 @@ a slight curve while driving straight. Simulated camera: fps, latency, field of 
 only seen from the front, the box hides tags behind it, range / bearing noise. The numbers in TRUTH
 are GUESSES: replace them with what you measure.
 
-    python3 sim_hw4.py short                      # one run, saves sim_hw4_short.png
-    python3 sim_hw4.py safe --seed 4
+    python3 sim_hw4.py safe                       # one run, saves sim_hw4_safe.png
+    python3 sim_hw4.py rrt --seed 4
     python3 sim_hw4.py both --runs 20             # statistics only
-    python3 sim_hw4.py short --set realign_tol_deg=20        # hw4_control setting
-    python3 sim_hw4.py short --loc meas_scale=2.0            # localizer parameter
-    python3 sim_hw4.py short --truth fps=4 --truth latency=0.3
+    python3 sim_hw4.py safe --set realign_tol_deg=20         # hw4_control setting
+    python3 sim_hw4.py safe --loc meas_scale=2.0             # localizer parameter
+    python3 sim_hw4.py safe --truth fps=4 --truth latency=0.3
 """
 import argparse
 import json
 import math
 import os
 import sys
-import tempfile
 import types
 
 import numpy as np
+import yaml
 
 VERBOSE = False                                            # -v: print hw4_control's console output
 
@@ -46,7 +46,6 @@ TRUTH = {
     'start_err_xy': 0.03, 'start_err_th': math.radians(3),
 }
 LOCALIZER = {                   # what hw4_launch.py gives the localizer
-    'accept_moving': True,
     'sigma_th_per_rad': 0.15,
     'cam_offset': 0.08,
 }
@@ -137,13 +136,6 @@ def install_stubs(params, quiet=True):
     }
     for k, v in mods.items():
         sys.modules[k] = v
-    try:
-        import spatialmath  # noqa: F401
-    except ImportError:
-        class UQ:
-            def __init__(self, th):
-                self.s, self.v = math.cos(th / 2), [0.0, 0.0, math.sin(th / 2)]
-        sys.modules['spatialmath'] = types.SimpleNamespace(UnitQuaternion=types.SimpleNamespace(Rz=UQ))
 
 
 # ===================================================================== simulation
@@ -165,7 +157,7 @@ def visible(world, tags, cam, th, T, rng):
             continue
         sr, sb = T['sr_per_m'] * r, T['sb']
         obs.append({'id': lid, 'r': round(r + rng.normal(0, sr), 4), 'b': round(b + rng.normal(0, sb), 5),
-                    'sr': round(sr, 4), 'sb': round(sb, 5), 'conf': 50.0})
+                    'sr': round(sr, 4), 'sb': round(sb, 5)})
     return obs
 
 
@@ -176,18 +168,19 @@ def run(mode, map_file, ctl_set, loc_set, T, seed, t_max=180.0):
     import robot_control.motion as mo
 
     rng = np.random.default_rng(seed)
-    tmp = tempfile.mkdtemp()
     localizer_node.time = types.SimpleNamespace(monotonic=lambda: Clock.t)   # simulated clock
     Clock.t = 0.0
-    params = dict(LOCALIZER, map_file=map_file, log_file=os.path.join(tmp, 'traj.csv'),
-                  map_log_file=os.path.join(tmp, 'map.csv'))
+    params = dict(LOCALIZER, map_file=map_file)
     params.update(loc_set)
     sys.modules['rclpy.node'].Node.declare_parameter = \
         lambda self, k, v: types.SimpleNamespace(value=params.get(k, v))
     loc = localizer_node.Localizer()
-    world, path, tags, met = hw4_control.load_map(map_file, mode)
+    world, path, met = hw4_control.load_map(map_file, mode)
+    with open(map_file) as f:
+        tags = {str(k): (float(v['x']), float(v['y']), math.radians(float(v.get('yaw_deg', 0.0))))
+                for k, v in (yaml.safe_load(f).get('landmarks') or {}).items()}
     cfg = dict(hw4_control.DEFAULTS, **ctl_set)
-    ctl = hw4_control.PivotController(path, tags, cfg, mo,
+    ctl = hw4_control.PivotController(path, cfg, mo,
                                       say=(lambda m: print(f'[{Clock.t:6.2f}] {m}')) if VERBOSE else None)
     String = sys.modules['std_msgs.msg'].String
     F32 = sys.modules['std_msgs.msg'].Float32MultiArray
@@ -258,8 +251,7 @@ def run(mode, map_file, ctl_set, loc_set, T, seed, t_max=180.0):
             'max_cross': float(max(cross)),
             'est_err': float(np.max(np.linalg.norm(true_xy - est_xy, axis=1))),
             'gap': float(min(world.obstacle_clearance(q) for q in true_xy) - world.radius),
-            'not_driving_s': float((~moving).sum() * ctl_dt), 'reloc': ctl.n_reloc,
-            'updates': loc.n_updates}
+            'not_driving_s': float((~moving).sum() * ctl_dt), 'updates': loc.n_updates}
 
 
 def plot(res, mode, fn):
@@ -280,7 +272,7 @@ def plot(res, mode, fn):
     ax.plot(t, res['LR'][:, 0], label='L command')
     ax.plot(t, res['LR'][:, 1], label='R command')
     ax.fill_between(t, 0, 1, where=np.array([s != 'drive' for s in res['states']]), color='gray', alpha=0.15,
-                    transform=ax.get_xaxis_transform(), label='not driving (turn / look / start)')
+                    transform=ax.get_xaxis_transform(), label='not driving (turn / verify / start)')
     ax.set_xlabel('t (s)')
     ax.set_title(f'commands  ({res["time"]:.1f} s, goal error {res["goal_err"] * 100:.1f} cm)', fontsize=10)
     ax.grid(alpha=0.3)
@@ -303,7 +295,7 @@ def kv(items):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('mode', choices=['short', 'safe', 'both'])
+    ap.add_argument('mode', choices=['safe', 'rrt', 'both'])
     ap.add_argument('--map', default=os.path.join(HERE, '..', 'config', 'map_hw4.yaml'))
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--runs', type=int, default=1)
@@ -318,15 +310,15 @@ def main():
     T = dict(TRUTH, **kv(args.truth))
     map_file = os.path.abspath(args.map)
     keys = [('time', 1, 's'), ('goal_err', 100, 'cm'), ('max_cross', 100, 'cm'), ('est_err', 100, 'cm'),
-            ('gap', 100, 'cm'), ('not_driving_s', 1, 's'), ('reloc', 1, '')]
-    for mode in (['short', 'safe'] if args.mode == 'both' else [args.mode]):
+            ('gap', 100, 'cm'), ('not_driving_s', 1, 's'), ('updates', 1, '')]
+    for mode in (['safe', 'rrt'] if args.mode == 'both' else [args.mode]):
         rs = [run(mode, map_file, kv(args.set), kv(args.loc), T, args.seed + i) for i in range(args.runs)]
         if args.runs == 1:
             r = rs[0]
             print(f'{mode}: {"reached" if r["reached"] else "NOT reached"} in {r["time"]:.1f} s, goal error '
                   f'{r["goal_err"] * 100:.1f} cm, max off-path {r["max_cross"] * 100:.1f} cm, max localizer '
                   f'error {r["est_err"] * 100:.1f} cm, min body-box gap {r["gap"] * 100:.1f} cm, not driving '
-                  f'{r["not_driving_s"]:.1f} s, re-localizations {r["reloc"]}, tag updates {r["updates"]}')
+                  f'{r["not_driving_s"]:.1f} s, tag updates {r["updates"]}')
             fn = os.path.join(os.getcwd(), f'sim_hw4_{mode}.png')
             plot(r, mode, fn)
             print(f'  saved {fn}')

@@ -1,32 +1,27 @@
 #!/usr/bin/env python3
-"""HW4 path planners: minimum distance (visibility graph) and maximum safety (Voronoi diagram).
+"""HW4 path planners on the known map (config/map_hw4.yaml).
 
-Both planners use the same known map (config/map_hw4.yaml) and the same search (Dijkstra);
-they differ in the world representation:
+    safe   VORONOI DIAGRAM of points sampled densely on the walls and the obstacle edges.
+           Keeping only the edges between samples of DIFFERENT objects leaves the
+           generalized Voronoi diagram: every point on it is as far as possible from the
+           two nearest objects. Edges closer than the inflation radius are removed, the
+           start and the goal are connected to the nearest visible vertices, and Dijkstra
+           finds the shortest route along the diagram. The path is then simplified (nearly
+           collinear points removed) without losing clearance, so the robot turns less.
 
-    shortest   VISIBILITY GRAPH. Every obstacle is grown by the robot radius + a margin
-               (configuration space, mitre corners), so the robot can be treated as a point.
-               Nodes = start, goal and the corners of the grown obstacles; an edge joins two
-               nodes that can see each other. The shortest path in the plane around polygons
-               only bends at their corners, so Dijkstra on this graph gives the shortest path.
+    rrt    RRT* (sampling-based, minimum distance): random tree in the configuration space
+           (obstacles grown by the robot radius + a margin, mitre corners, so the robot is a
+           point), with choose-parent + rewiring so the path length converges toward the
+           optimum; informed sampling once a path exists; line-of-sight shortcutting before
+           driving.
 
-    safest     VORONOI DIAGRAM of points sampled densely on the walls and the obstacle edges.
-               Keeping only the edges between samples of DIFFERENT objects leaves the
-               generalized Voronoi diagram: every point on it is as far as possible from the
-               two nearest objects. Edges closer than the inflation radius are removed, the
-               start and the goal are connected to the nearest visible vertices, and Dijkstra
-               finds the shortest route along the diagram. The path is then simplified (nearly
-               collinear points removed) without losing clearance, so the robot turns less.
+    VISIBILITY GRAPH (plan_visibility): the exact shortest path on the same configuration
+           space (nodes = start, goal and the grown obstacle corners, Dijkstra). Not driven:
+           only the reference the RRT* convergence plot is compared with.
 
-    shortest   RRT* (sampling-based alternative, plan_rrtstar): random tree in the same
-    (RRT*)     configuration space, with choose-parent + rewiring so the path length converges
-               toward the visibility-graph optimum; informed sampling once a path exists;
-               line-of-sight shortcutting before driving. Writes path_rrtstar.png (tree +
-               convergence vs the visibility-graph length).
-
-hw4_control.py calls plan_visibility / plan_voronoi at start-up. Run this file on its own to
-print the comparison table and save path_compare.png (both representations and paths, for the
-report) next to the map file unless --out is given.
+hw4_control.py calls plan_voronoi (mode:=safe) / plan_rrtstar (mode:=rrt) at start-up. Run this
+file on its own to print the comparison table and save path_compare.png and path_rrtstar.png
+(for the report) next to the map file unless --out is given.
 
 No ROS imports: runs on a laptop.
     pip install numpy scipy matplotlib pyyaml

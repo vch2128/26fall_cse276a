@@ -1,24 +1,19 @@
-"""EKF-SLAM for a unicycle robot with range-bearing landmark measurements.
+"""EKF for a unicycle robot with range-bearing measurements of KNOWN landmarks (AprilTags).
 
-State  x = [xr, yr, thr, l1x, l1y, l2x, l2y, ...]   (robot pose, then one (x, y) per landmark)
-Covariance P is (3 + 2n) x (3 + 2n) and grows when a new landmark is added.
-
-The map frame is the robot's START pose: x0 = [0, 0, 0] with P0 = 0, because the
-robot does not know where it starts. To compare with the measured map, transform
-the estimate with the measured start pose afterwards (tools/evaluate_map.py).
+State  x = [xr, yr, thr, l1x, l1y, l2x, l2y, ...]   (robot pose, then one (x, y) per tag)
+The tags are put in the state by the localizer from the map (map_hw4.yaml) with a small
+covariance, so the filter localizes the robot in the known map.
 
 Models (same as Peter Corke's Robotics Toolbox Unicycle / RangeBearingSensor,
-written out here so F, G, H can be shown in the report and the file runs
+written out here so F, H can be shown in the report and the file runs
 without the toolbox):
     motion       xr' = xr + ds cos(thr),  yr' = yr + ds sin(thr),  thr' = thr + dth
     measurement  z = [r, b] from the CAMERA, which sits `a` m ahead of the robot centre:
                  cx = xr + a cos(thr), cy = yr + a sin(thr)
                  r = sqrt((lx-cx)^2 + (ly-cy)^2),  b = atan2(ly-cy, lx-cx) - thr
-    new landmark lx = cx + r cos(thr + b),  ly = cy + r sin(thr + b)
 
-Landmarks are identified by the detector's id (YOLO class or AprilTag id), so
-data association is known; the filter does not assume how many there are.
-No ROS imports, so it can be tested on a laptop (tools/sim_slam.py).
+Tags are identified by the detector's id, so data association is known.
+No ROS imports, so it can be tested on a laptop (sim_hw4.py).
 """
 import math
 
@@ -30,36 +25,23 @@ def wrap(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
 
 
-class SlamEKF:
-    def __init__(self, cam_offset=0.0, P0_robot=(1e-6, 1e-6, 1e-6)):
+class LandmarkEKF:
+    def __init__(self, cam_offset=0.0):
         self.a = cam_offset
-        self.x = np.zeros(3)                       # robot starts at the origin of its own map
-        self.P = np.diag(P0_robot).astype(float)   # (almost) zero: the start pose defines the frame
-        self.ids = []                              # landmark id -> position in self.ids
+        self.x = np.zeros(3)                       # start pose and tags: set by the localizer (map)
+        self.P = np.zeros((3, 3))
+        self.ids = []                              # tag id -> position in self.ids
 
     # ------------------------------------------------------------------ helpers
     @property
     def n(self):
-        """Number of landmarks in the map."""
+        """Number of tags in the state."""
         return len(self.ids)
 
     def idx(self, lid):
-        """Index of landmark lid's x in the state vector (y is idx + 1)."""
+        """Index of tag lid's x in the state vector (y is idx + 1)."""
         return 3 + 2 * self.ids.index(lid)
 
-    def landmarks(self):
-        """{id: (x, y, 2x2 covariance)} for every landmark in the map."""
-        out = {}
-        for lid in self.ids:
-            i = self.idx(lid)
-            out[lid] = (self.x[i], self.x[i + 1], self.P[i:i + 2, i:i + 2].copy())
-        return out
-    '''
-    def camera(self):
-        """Camera position in the map frame."""
-        xr, yr, th = self.x[:3]
-        return xr + self.a * math.cos(th), yr + self.a * math.sin(th)
-    '''
     def inflate_robot(self, var_xy, var_th):
         """Add uncertainty to the robot pose only (used when the filter seems lost)."""
         self.P[0, 0] += var_xy
@@ -113,48 +95,13 @@ class SlamEKF:
         H[1, i:i + 2] = [-dy / q, dx / q]
         return z_hat, H
 
-    # ------------------------------------------------------------------ new landmark
-    def add_landmark(self, lid, z, R):
-        """First sighting: place the landmark from the current pose and z, and extend x and P.
-
-        l = g(x_robot, z);  Gx = dg/dx_robot (2x3),  Gz = dg/dz (2x2)
-        P_ll = Gx P_rr Gx^T + Gz R Gz^T,   P_l,* = Gx P_r,*
-        """
-        r, b = z
-        xr, yr, th = self.x[:3]
-        c, s = math.cos(th), math.sin(th)
-        ca, sa = math.cos(th + b), math.sin(th + b)
-        lx = xr + self.a * c + r * ca
-        ly = yr + self.a * s + r * sa
-        Gx = np.array([[1.0, 0.0, -self.a * s - r * sa],
-                       [0.0, 1.0, self.a * c + r * ca]])
-        Gz = np.array([[ca, -r * sa],
-                       [sa, r * ca]])
-
-        N = len(self.x)
-        P_new = np.zeros((N + 2, N + 2))
-        P_new[:N, :N] = self.P
-        cross = Gx @ self.P[:3, :]                               # 2 x N
-        P_new[N:, :N] = cross
-        P_new[:N, N:] = cross.T
-        P_new[N:, N:] = Gx @ self.P[:3, :3] @ Gx.T + Gz @ R @ Gz.T
-        self.x = np.concatenate([self.x, [lx, ly]])
-        self.P = P_new
-        self.ids.append(lid)
-
     # ------------------------------------------------------------------ update
     def update(self, lid, z, R, gate=9.21):
-        """One observation z = [r, b] of landmark lid.
-
-        Unknown id -> add it to the map (returns 'new').
-        Known id   -> EKF update with a Mahalanobis gate (9.21 = 99%, 2 DOF):
-                      returns 'ok' or 'rejected'.  Also returns d2 (None for 'new').
+        """One observation z = [r, b] of tag lid (must be in self.ids).
+        EKF update with a Mahalanobis gate (9.21 = 99%, 2 DOF): returns 'ok' or 'rejected', and d2.
         """
         z = np.asarray(z, dtype=float)
         R = np.asarray(R, dtype=float)
-        if lid not in self.ids:
-            self.add_landmark(lid, z, R)
-            return 'new', None
         z_hat, H = self.expected(lid)
         nu = np.array([z[0] - z_hat[0], wrap(z[1] - z_hat[1])])
         S = H @ self.P @ H.T + R

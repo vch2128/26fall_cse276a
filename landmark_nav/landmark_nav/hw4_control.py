@@ -316,7 +316,12 @@ def load_map(map_file, mode):
     with open(map_file) as f:
         m = yaml.safe_load(f)
     world = planner.World(m)
-    res = planner.plan_visibility(world) if mode == 'short' else planner.plan_voronoi(world)
+    if mode == 'short':
+        res = planner.plan_visibility(world)
+    elif mode == 'rrt':
+        res = planner.plan_rrtstar(world, iters=3000, step=0.25, seed=0)
+    else:
+        res = planner.plan_voronoi(world)
     path = [tuple(map(float, q)) for q in res['path']]
     tags = {str(k): (float(v['x']), float(v['y']), math.radians(float(v.get('yaw_deg', 0.0))))
             for k, v in (m.get('landmarks') or {}).items()}
@@ -335,8 +340,8 @@ def main():
     node = rclpy.create_node('hw4_control')
     p = node.declare_parameter
     mode = p('mode', 'short').value
-    if mode not in ('short', 'safe'):
-        raise ValueError("mode must be 'short' or 'safe'")
+    if mode not in ('short', 'safe', 'rrt'):
+        raise ValueError("mode must be 'short', 'safe' or 'rrt'")
     map_file = os.path.expanduser(p('map_file', planner.default_map()).value)
     log_dir = os.path.expanduser(p('log_dir', '~/ros2_ws/src/26fall_cse276a/traj_log').value)
     cfg = {k: p(k, v).value for k, v in DEFAULTS.items()}
